@@ -10,8 +10,8 @@ import time
 class CrsfConfig:
     UART_ID = 0
     BAUDRATE = 420000
-    TX_PIN = 12
-    RX_PIN = 13
+    TX_PIN = 16
+    RX_PIN = 17
     SYNC_BYTE = 0xC8
     TYPE_CHANNELS = 0x16
     CHANNEL_NUM = 16
@@ -24,16 +24,16 @@ class HardwareConfig:
     # (PWM Pin, DIR Pin, Reversed)
     MOTOR_PINS = [
         (2, 3, True),  # 0: 左前輪 (LF)
-        (4, 5, False),  # 1: 右前輪 (RF)
-        (6, 7, False),  # 2: 右後輪 (RR)
-        (8, 9, True),  # 3: 左後輪 (LR)
+        (6, 7, True),  # 1: 右前輪 (RF)
+        (8, 9, False),  # 2: 右後輪 (RR)
+        (4, 5, False),  # 3: 左後輪 (LR)
     ]
     # (Encoder A Pin)
     ENCODER_PINS = [
-        18,  # 0: LF Encoder
-        20,  # 1: RF Encoder
-        16,  # 2: RR Encoder
-        14,  # 3: LR Encoder
+        12,  # 0: LF Encoder
+        13,  # 1: RF Encoder
+        14,  # 2: RR Encoder
+        15,  # 3: LR Encoder
     ]
 
 
@@ -666,8 +666,6 @@ if __name__ == "__main__":
             led.value(1)  # 使用 toggle 讓 LED 閃爍，方便觀察是否正常運行
             radio.update()
             # time.sleep_ms(5)  # 主迴圈稍微延遲，避免 CPU 佔用率 100%
-
-            # --- 命令列模式 (若要使用，請註解掉上面的遙控模式迴圈) ---
             # cli = CLI(robot, calibrator)
             # cli.run()
 
