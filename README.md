@@ -9,6 +9,7 @@
 -   DBR4.py : 測試遙控器接收程式
 -   motor.py : 無刷馬達測試
 -   plat_motor : 伺服馬達測試
+-   remote_recive : 從 DBR4 接收訊號並且發送訊號給 main
 
 ## 接線圖
 
