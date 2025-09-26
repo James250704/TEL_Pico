@@ -2,7 +2,7 @@ from machine import UART
 import time
 
 # ===== UART 初始化 =====
-uart = UART(0, baudrate=420000, tx=12, rx=13, bits=8, parity=None, stop=1)
+uart = UART(1, baudrate=420000, tx=8, rx=9, bits=8, parity=None, stop=1)
 
 # ===== CRSF 常數 =====
 CRSF_SYNC = 0xC8
