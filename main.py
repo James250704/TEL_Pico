@@ -4,6 +4,7 @@ import utime
 from machine import Pin, PWM, Timer, UART, disable_irq, enable_irq
 import time
 
+
 # ==================== 常數與設定 (Constants & Configuration) ====================
 # --- DBR4 CRSF 接收器設定 ---
 class CrsfConfig:
@@ -16,6 +17,7 @@ class CrsfConfig:
     CHANNEL_NUM = 16
     RC_CENTER = 992
     RC_RANGE = 820
+
 
 # --- 機器人硬體設定 ---
 class HardwareConfig:
@@ -34,6 +36,7 @@ class HardwareConfig:
         15,  # 3: LR Encoder
     ]
 
+
 # --- 機器人參數 ---
 class RobotParams:
     CONTROL_DT_MS = 8  # 控制迴圈間隔 (ms)
@@ -45,6 +48,7 @@ class RobotParams:
     PID_OUT_LIM = 50.0  # PID 輸出限制 (百分比)
     MAX_DUTY = 40000  # PWM 最大 Duty
     DEFAULT_MOTOR_SCALE = [1.0105, 0.9965, 0.9931, 1.0001]  # 馬達校準值
+
 
 # ==================== Radio 遙控器轉換器 ====================
 class RadioControl:
@@ -117,6 +121,7 @@ class RadioControl:
         # 將遙控器數據直接轉換為運動學指令
         self.robot.apply_kinematics(vx, vy, omega)
 
+
 # ==================== PID 控制器 ====================
 class PID:
     def __init__(
@@ -172,6 +177,7 @@ class PID:
         self.prev_u = out
         return out
 
+
 # ==================== 硬體抽象層 ====================
 class Motor:
     """單一馬達的 PWM 與方向控制"""
@@ -196,6 +202,7 @@ class Motor:
 
     def stop(self):
         self.pwm.duty_u16(0)
+
 
 class SafeEncoder:
     """線程安全 (中斷安全) 的編碼器計數器"""
@@ -226,6 +233,7 @@ class SafeEncoder:
     def deinit(self):
         if self.pin:
             self.pin.irq(handler=None)
+
 
 # ==================== 麥克納姆輪機器人主類別 (整合全向運動學) ====================
 class MecanumRobot:
@@ -371,6 +379,7 @@ class MecanumRobot:
             motor.stop()
         for enc in self.encs:
             enc.deinit()
+
 
 # ==================== 主程式入口 ====================
 if __name__ == "__main__":
