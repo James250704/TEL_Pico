@@ -22,11 +22,9 @@ class HardwareConfig:
     MOTOR_PINS = [
         (2, 3, False),  # 0: 左前輪 (LF)
         (6, 7, True),  # 1: 右前輪 (RF)
-        (8, 9, False),  # 2: 右後輪 (RR) (注意: 這與通訊 TX/RX Pin 衝突，請更換)
+        (10, 11, False),  # 2: 右後輪 (RR)
         (4, 5, True),  # 3: 左後輪 (LR)
     ]
-    # **重要**: GP8, GP9 已被 UART 使用，請將右後輪馬達的 Pin 腳更換成其他未使用的 Pin
-    # 例如: MOTOR_PINS = [(2,3,False), (6,7,True), (10,11,False), (4,5,True)]
 
     # (Encoder A Pin)
     ENCODER_PINS = [12, 13, 14, 15]
@@ -54,10 +52,10 @@ class ServoParams:
     MIN_PULSE_US = 500
     MAX_PULSE_US = 2500
     # 角度限制
-    PAN_MIN_ANGLE = -90  # 水平最小角度
-    PAN_MAX_ANGLE = 90  # 水平最大角度
-    PITCH_MIN_ANGLE = -20  # 俯仰最小角度
-    PITCH_MAX_ANGLE = 20  # 俯仰最大角度
+    PAN_MIN_ANGLE = -20  # 水平最小角度
+    PAN_MAX_ANGLE = 20  # 水平最大角度
+    PITCH_MIN_ANGLE = -90  # 俯仰最小角度
+    PITCH_MAX_ANGLE = 90  # 俯仰最大角度
 
 
 # ==================== PID 控制器 (與原版相同) ====================
@@ -330,18 +328,27 @@ if __name__ == "__main__":
                             for part in parts
                         ):
                             try:
-                                vx, vy, omega, pan, pitch = [
+                                # 【*** 這裏是修改的關鍵 ***】
+                                # 按照新的順序解析參數：
+                                # parts[0] -> pan (雲台)
+                                # parts[1] -> pitch (雲台)
+                                # parts[2] -> omega (旋轉)
+                                # parts[3] -> vx (行走)
+                                # parts[4] -> vy (行走)
+                                pan, pitch, omega, vx, vy = [
                                     int(p.strip()) for p in parts
                                 ]
 
-                                # 控制底盤
+                                # 控制底盤 (使用 vx, vy, omega)
                                 robot.apply_kinematics(vx, vy, omega)
 
-                                # 控制雲台
+                                # 控制雲台 (使用 pan, pitch)
                                 gimbal.set_pan(pan)
                                 gimbal.set_pitch(pitch)
 
-                                # print(f"Executing: vx={vx}, vy={vy}, o={omega}, pan={pan}, pitch={pitch}") # 用於除錯
+                                print(
+                                    f"Executing: vx={vx}, vy={vy}, o={omega}, pan={pan}, pitch={pitch}"
+                                )  # 用於除錯
                             except ValueError:
                                 # 靜默忽略無效的數值轉換
                                 pass
@@ -351,8 +358,7 @@ if __name__ == "__main__":
                     # 靜默忽略解碼錯誤，這些通常是不完整的封包
                     pass
 
-            utime.sleep_ms(5)  # 短暫延遲，避免 CPU 佔用過高
-
+        utime.sleep_ms(5)  # 短暫延遲，避免 CPU 佔用過高
     except KeyboardInterrupt:
         print("\nProgram stopped by user.")  # 中文解釋: 使用者已停止程式。
     finally:
