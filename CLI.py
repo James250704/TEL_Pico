@@ -23,18 +23,14 @@ class CrsfConfig:
 class HardwareConfig:
     # (PWM Pin, DIR Pin, Reversed)
     MOTOR_PINS = [
-        (2, 3, True),  # 0: 左前輪 (LF)
+        (2, 3, False),  # 0: 左前輪 (LF)
         (6, 7, True),  # 1: 右前輪 (RF)
-        (8, 9, False),  # 2: 右後輪 (RR)
-        (4, 5, False),  # 3: 左後輪 (LR)
+        (10, 11, False),  # 2: 右後輪 (RR)
+        (4, 5, True),  # 3: 左後輪 (LR)
     ]
+
     # (Encoder A Pin)
-    ENCODER_PINS = [
-        12,  # 0: LF Encoder
-        13,  # 1: RF Encoder
-        14,  # 2: RR Encoder
-        15,  # 3: LR Encoder
-    ]
+    ENCODER_PINS = [12, 13, 14, 15]
 
 
 # --- 機器人參數 ---
@@ -664,10 +660,10 @@ if __name__ == "__main__":
         # --- 遙控模式 (預設) ---
         while True:
             led.value(1)  # 使用 toggle 讓 LED 閃爍，方便觀察是否正常運行
-            radio.update()
+            # radio.update()
             # time.sleep_ms(5)  # 主迴圈稍微延遲，避免 CPU 佔用率 100%
-            # cli = CLI(robot, calibrator)
-            # cli.run()
+            cli = CLI(robot, calibrator)
+            cli.run()
 
     except KeyboardInterrupt:
         print("\nScript interrupted by user.")

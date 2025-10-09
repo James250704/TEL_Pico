@@ -283,88 +283,75 @@ class MecanumRobot:
             enc.deinit()
 
 
-# ==================== 主程式入口 ====================
+# ==================== 主程式入口 (最終版 - 使用緩衝區解決封包切割問題) ====================
 if __name__ == "__main__":
     robot = None
     gimbal = None
     try:
         # 1. 初始化硬體
-        print("Initializing hardware...")  # 中文解釋: 正在初始化硬體...
+        print("Initializing hardware...") # 中文解釋: 正在初始化硬體...
         params = RobotParams()
         robot = MecanumRobot(params)
         gimbal = ServoGimbal()
-        led = Pin(25, Pin.OUT)
+        led = Pin("LED", Pin.OUT)
 
         # 2. 初始化 UART 接收器
         comm_uart = UART(
             CommConfig.UART_ID,
             baudrate=CommConfig.BAUDRATE,
             tx=Pin(CommConfig.TX_PIN_TO_REMOTE),
-            rx=Pin(CommConfig.RX_PIN_FROM_REMOTE),
+            rx=Pin(CommConfig.RX_PIN_FROM_REMOTE)
         )
-        print(
-            "Main controller ready. Waiting for commands..."
-        )  # 中文解釋: 主控制器已就緒，等待指令中...
+        print("Main controller ready. Waiting for commands...") # 中文解釋: 主控制器已就緒，等待指令中...
+
+        # 建立一個空的位元組緩衝區來累積收到的資料
+        command_buffer = b''
 
         # --- 主迴圈: 監聽 UART 指令並執行 ---
         while True:
-            led.toggle()
+            # led.toggle() # 在高速迴圈中，LED閃爍會太快看不見，可以先關閉
+
+            # 步驟 1: 盡可能快地將所有UART數據讀入緩衝區
             if comm_uart.any():
-                # 讀取一行指令 (以 '\n' 結尾)
-                line = comm_uart.readline()
-                if not line:
-                    continue
+                new_data = comm_uart.read()
+                if new_data:
+                    command_buffer += new_data
+
+            # 步驟 2: 使用 "while" 迴圈，一次性處理完緩衝區中所有完整的指令
+            while True:
+                newline_pos = command_buffer.find(b'\n')
+                if newline_pos == -1:
+                    # 如果緩衝區中沒有找到換行符，代表沒有完整指令了，跳出內層迴圈
+                    break
+
+                # 提取一條完整指令
+                full_command_bytes = command_buffer[:newline_pos + 1]
+                # 從緩衝區移除已處理的指令
+                command_buffer = command_buffer[newline_pos + 1:]
 
                 try:
-                    # 解碼並清理字串
-                    command = line.decode("utf-8").strip()
-
-                    # 檢查並解析指令
+                    command = full_command_bytes.decode("utf-8").strip()
                     if command.startswith("CMD:"):
                         parts = command[4:].split(",")
-                        # 檢查是否有 5 個完整的參數，且每個都不為空
-                        if len(parts) == 5 and all(
-                            part.strip() and part.strip() not in ["-", "+"]
-                            for part in parts
-                        ):
-                            try:
-                                # 【*** 這裏是修改的關鍵 ***】
-                                # 按照新的順序解析參數：
-                                # parts[0] -> pan (雲台)
-                                # parts[1] -> pitch (雲台)
-                                # parts[2] -> omega (旋轉)
-                                # parts[3] -> vx (行走)
-                                # parts[4] -> vy (行走)
-                                pan, pitch, omega, vx, vy = [
-                                    int(p.strip()) for p in parts
-                                ]
-
-                                # 控制底盤 (使用 vx, vy, omega)
-                                robot.apply_kinematics(vx, vy, omega)
-
-                                # 控制雲台 (使用 pan, pitch)
-                                gimbal.set_pan(pan)
-                                gimbal.set_pitch(pitch)
-
-                                print(
-                                    f"Executing: vx={vx}, vy={vy}, o={omega}, pan={pan}, pitch={pitch}"
-                                )  # 用於除錯
-                            except ValueError:
-                                # 靜默忽略無效的數值轉換
-                                pass
-                        # else:
-                        #     print(f"Invalid command format: {command}") # 可選的除錯輸出
-                except (UnicodeDecodeError, IndexError) as e:
-                    # 靜默忽略解碼錯誤，這些通常是不完整的封包
+                        if len(parts) == 5:
+                            pan, pitch, omega, vx, vy = [int(p.strip()) for p in parts]
+                            # print(f"Executing: vx={vx}, vy={vy}, omega={omega}, pan={pan}, pitch={pitch}") # 除錯時再打開
+                            robot.apply_kinematics(vx, vy, omega)
+                            gimbal.set_pan(pan)
+                            gimbal.set_pitch(pitch)
+                except Exception as e:
+                    # print(f"Error processing command: {e}") # 除錯時再打開
                     pass
+            
+            # 步驟 3: 將 sleep 時間大幅縮短或移除
+            utime.sleep_ms(0) # 可嘗試 1 或 0
 
-        utime.sleep_ms(5)  # 短暫延遲，避免 CPU 佔用過高
     except KeyboardInterrupt:
-        print("\nProgram stopped by user.")  # 中文解釋: 使用者已停止程式。
+        print("\nProgram stopped by user.") # 中文解釋: 使用者已停止程式。
     finally:
         if robot:
             robot.deinit()
-            print("Robot deinitialized.")  # 中文解釋: 機器人已取消初始化。
+            print("Robot deinitialized.") # 中文解釋: 機器人已取消初始化。
         if gimbal:
             gimbal.deinit()
-            print("Gimbal deinitialized.")  # 中文解釋: 雲台已取消初始化。
+            print("Gimbal deinitialized.") # 中文解釋: 雲台已取消初始化。
