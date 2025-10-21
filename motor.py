@@ -1,6 +1,4 @@
-# motor_control_dual.py
-# Control two brushless motors (via SimonK 30A ESCs) with Raspberry Pi Pico and MicroPython.
-# User can input speed (0–100%) for both motors.
+# 控制無刷馬達
 
 from machine import Pin, PWM
 import time

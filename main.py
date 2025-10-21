@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# 檔案名稱: main_controller.py
+# 檔案名稱: main.py
 # 功能: 接收來自遙控 Pico 的 UART 指令，控制麥克納姆輪平台與伺服馬達雲台
 
 import utime
@@ -43,7 +43,8 @@ class RobotParams:
     PID_KD = 0.0
     PID_OUT_LIM = 50.0
     MAX_DUTY = 40000
-    DEFAULT_MOTOR_SCALE = [1.0105, 0.9965, 0.9931, 1.0001]
+    # DEFAULT_MOTOR_SCALE = [1.0105, 0.9965, 0.9931, 1.0001]
+    DEFAULT_MOTOR_SCALE = [1.0, 1.0, 1.0, 1.0]
 
 
 # --- 伺服馬達參數 ---
@@ -289,7 +290,7 @@ if __name__ == "__main__":
     gimbal = None
     try:
         # 1. 初始化硬體
-        print("Initializing hardware...") # 中文解釋: 正在初始化硬體...
+        print("Initializing hardware...")  # 中文解釋: 正在初始化硬體...
         params = RobotParams()
         robot = MecanumRobot(params)
         gimbal = ServoGimbal()
@@ -300,12 +301,14 @@ if __name__ == "__main__":
             CommConfig.UART_ID,
             baudrate=CommConfig.BAUDRATE,
             tx=Pin(CommConfig.TX_PIN_TO_REMOTE),
-            rx=Pin(CommConfig.RX_PIN_FROM_REMOTE)
+            rx=Pin(CommConfig.RX_PIN_FROM_REMOTE),
         )
-        print("Main controller ready. Waiting for commands...") # 中文解釋: 主控制器已就緒，等待指令中...
+        print(
+            "Main controller ready. Waiting for commands..."
+        )  # 中文解釋: 主控制器已就緒，等待指令中...
 
         # 建立一個空的位元組緩衝區來累積收到的資料
-        command_buffer = b''
+        command_buffer = b""
 
         # --- 主迴圈: 監聽 UART 指令並執行 ---
         while True:
@@ -319,15 +322,15 @@ if __name__ == "__main__":
 
             # 步驟 2: 使用 "while" 迴圈，一次性處理完緩衝區中所有完整的指令
             while True:
-                newline_pos = command_buffer.find(b'\n')
+                newline_pos = command_buffer.find(b"\n")
                 if newline_pos == -1:
                     # 如果緩衝區中沒有找到換行符，代表沒有完整指令了，跳出內層迴圈
                     break
 
                 # 提取一條完整指令
-                full_command_bytes = command_buffer[:newline_pos + 1]
+                full_command_bytes = command_buffer[: newline_pos + 1]
                 # 從緩衝區移除已處理的指令
-                command_buffer = command_buffer[newline_pos + 1:]
+                command_buffer = command_buffer[newline_pos + 1 :]
 
                 try:
                     command = full_command_bytes.decode("utf-8").strip()
@@ -342,16 +345,16 @@ if __name__ == "__main__":
                 except Exception as e:
                     # print(f"Error processing command: {e}") # 除錯時再打開
                     pass
-            
+
             # 步驟 3: 將 sleep 時間大幅縮短或移除
-            utime.sleep_ms(0) # 可嘗試 1 或 0
+            utime.sleep_ms(0)  # 可嘗試 1 或 0
 
     except KeyboardInterrupt:
-        print("\nProgram stopped by user.") # 中文解釋: 使用者已停止程式。
+        print("\nProgram stopped by user.")  # 中文解釋: 使用者已停止程式。
     finally:
         if robot:
             robot.deinit()
-            print("Robot deinitialized.") # 中文解釋: 機器人已取消初始化。
+            print("Robot deinitialized.")  # 中文解釋: 機器人已取消初始化。
         if gimbal:
             gimbal.deinit()
-            print("Gimbal deinitialized.") # 中文解釋: 雲台已取消初始化。
+            print("Gimbal deinitialized.")  # 中文解釋: 雲台已取消初始化。

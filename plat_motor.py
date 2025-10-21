@@ -1,4 +1,5 @@
-# servo_dual_axis_limited.py
+# 雙軸伺服馬達控制程式
+
 import utime
 from machine import Pin, PWM
 

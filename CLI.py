@@ -1,3 +1,5 @@
+# 使用 CLI 控制麥克納姆輪機器人
+
 # -*- coding: utf-8 -*-
 import sys
 import utime
@@ -86,7 +88,7 @@ class RadioControl:
             RobotState.MOVE: self._handle_move,
         }
 
-    def _parse_channels(self, data: memoryview) -> Optional[List[int]]:
+    def _parse_channels(self, data: memoryview):
         """解析 CRSF channel 資料 (22 bytes)"""
         if len(data) < 22:
             return None
@@ -100,7 +102,7 @@ class RadioControl:
                 bitcount -= 11
         return values[: CrsfConfig.CHANNEL_NUM]
 
-    def _poll_uart(self) -> Optional[List[int]]:
+    def _poll_uart(self):
         """從 UART buffer 擷取並解析 CRSF 封包"""
         n = self.uart.readinto(self.buf)
         if not n:
@@ -295,10 +297,10 @@ class MecanumRobot:
     VEC_RIGHT = (100, -100, -100, 100)
     VEC_TURN_LEFT = (-100, 100, -100, 100)  # 原地左旋
     VEC_TURN_RIGHT = (100, -100, 100, -100)  # 原地右旋
-    VEC_FORWARD_LEFT = (0, 100, 100, 0)
-    VEC_FORWARD_RIGHT = (100, 0, 0, 100)
-    VEC_BACKWARD_LEFT = (-100, 0, 0, -100)
-    VEC_BACKWARD_RIGHT = (0, -100, -100, 0)
+    VEC_FORWARD_LEFT = (100, 0, 100, 0)
+    VEC_FORWARD_RIGHT = (0, 100, 0, 100)
+    VEC_BACKWARD_LEFT = (-100, 0, -100, 0)
+    VEC_BACKWARD_RIGHT = (0, -100, 0, -100)
 
     def __init__(self, params: RobotParams):
         self.params = params

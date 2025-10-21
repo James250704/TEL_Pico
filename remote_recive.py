@@ -8,11 +8,12 @@ import utime
 
 # ==================== 常數與設定 (Constants & Configuration) ====================
 
+
 class CrsfConfig:
-    UART_ID = 1
+    UART_ID = 0
     BAUDRATE = 420000
-    TX_PIN_DBR4 = 8
-    RX_PIN_DBR4 = 9
+    TX_PIN_DBR4 = 16
+    RX_PIN_DBR4 = 17
     SYNC_BYTE = 0xC8
     TYPE_CHANNELS = 0x16
     CHANNEL_NUM = 16
@@ -21,30 +22,50 @@ class CrsfConfig:
     RC_DEADBAND = 30
     MAX_RAW_CHANGE_PER_STEP = 800
 
+
 class CommConfig:
-    UART_ID = 0
+    UART_ID = 1
     BAUDRATE = 115200
-    TX_PIN_TO_MAIN = 16
-    RX_PIN_FROM_MAIN = 17
+    TX_PIN_TO_MAIN = 8
+    RX_PIN_FROM_MAIN = 9
+
 
 # ==================== 遙控器訊號處理 ====================
 class RemoteControlTransmitter:
     def __init__(self):
-        self.dbr4_uart = UART(CrsfConfig.UART_ID, baudrate=CrsfConfig.BAUDRATE, tx=Pin(CrsfConfig.TX_PIN_DBR4), rx=Pin(CrsfConfig.RX_PIN_DBR4), bits=8, parity=None, stop=1)
-        self.main_uart = UART(CommConfig.UART_ID, baudrate=CommConfig.BAUDRATE, tx=Pin(CommConfig.TX_PIN_TO_MAIN), rx=Pin(CommConfig.RX_PIN_FROM_MAIN))
-        
+        self.dbr4_uart = UART(
+            CrsfConfig.UART_ID,
+            baudrate=CrsfConfig.BAUDRATE,
+            tx=Pin(CrsfConfig.TX_PIN_DBR4),
+            rx=Pin(CrsfConfig.RX_PIN_DBR4),
+            bits=8,
+            parity=None,
+            stop=1,
+        )
+        self.main_uart = UART(
+            CommConfig.UART_ID,
+            baudrate=CommConfig.BAUDRATE,
+            tx=Pin(CommConfig.TX_PIN_TO_MAIN),
+            rx=Pin(CommConfig.RX_PIN_FROM_MAIN),
+        )
+
         self.buf = bytearray(128)
         self.latest_channels = [CrsfConfig.RC_CENTER] * CrsfConfig.CHANNEL_NUM
-        
+
         self.last_valid_raw_omega = CrsfConfig.RC_CENTER
         self.last_final_omega = 0
 
         print("Remote receiver initialized.")
-        print(f"Listening to DBR4 on UART {CrsfConfig.UART_ID} (RX:{CrsfConfig.RX_PIN_DBR4})")
-        print(f"Transmitting commands on UART {CommConfig.UART_ID} (TX:{CommConfig.TX_PIN_TO_MAIN})")
+        print(
+            f"Listening to DBR4 on UART {CrsfConfig.UART_ID} (RX:{CrsfConfig.RX_PIN_DBR4})"
+        )
+        print(
+            f"Transmitting commands on UART {CommConfig.UART_ID} (TX:{CommConfig.TX_PIN_TO_MAIN})"
+        )
 
     def _parse_channels(self, data: memoryview):
-        if len(data) < 22: return None
+        if len(data) < 22:
+            return None
         values, bits, bitcount = [], 0, 0
         for b in data:
             bits |= b << bitcount
@@ -57,7 +78,8 @@ class RemoteControlTransmitter:
 
     def _poll_dbr4_uart(self):
         n = self.dbr4_uart.readinto(self.buf)
-        if not n: return None
+        if not n:
+            return None
         data = memoryview(self.buf)[:n]
         for i in range(len(data)):
             if data[i] == CrsfConfig.SYNC_BYTE and i + 2 < len(data):
@@ -69,7 +91,10 @@ class RemoteControlTransmitter:
         return None
 
     def _normalize(self, val: int) -> int:
-        val = max(CrsfConfig.RC_CENTER - CrsfConfig.RC_RANGE, min(val, CrsfConfig.RC_CENTER + CrsfConfig.RC_RANGE))
+        val = max(
+            CrsfConfig.RC_CENTER - CrsfConfig.RC_RANGE,
+            min(val, CrsfConfig.RC_CENTER + CrsfConfig.RC_RANGE),
+        )
         return int((val - CrsfConfig.RC_CENTER) * 100 / CrsfConfig.RC_RANGE)
 
     def _deadband(self, val: int) -> int:
@@ -84,7 +109,7 @@ class RemoteControlTransmitter:
         vy = self._deadband(self._normalize(self.latest_channels[0]))
         pitch = self._deadband(self._normalize(self.latest_channels[2]))
         pan = self._deadband(self._normalize(self.latest_channels[3]))
-        
+
         omega_raw = self.latest_channels[9]
         change = abs(omega_raw - self.last_valid_raw_omega)
 
@@ -94,7 +119,7 @@ class RemoteControlTransmitter:
             omega = self._deadband(self._normalize(omega_raw))
             self.last_valid_raw_omega = omega_raw
             self.last_final_omega = omega
-        
+
         # 為了除錯，暫時關閉之前的 omega debug print
         # print(f"Omega Debug -> Raw CH9: {omega_raw}, Final Omega: {omega}")
 
@@ -102,11 +127,12 @@ class RemoteControlTransmitter:
 
         # ====================【新增：印出最終封包】====================
         # .strip() 是為了讓序列埠監控的輸出更整潔，不影響實際發送的 "\n"
-        # print(f"Final Packet Sent: {command_string.strip()}")
+        print(f"Final Packet Sent: {command_string.strip()}")
         # ==========================================================
 
         # 透過 UART 發送給主控板
         self.main_uart.write(command_string.encode("utf-8"))
+
 
 # ==================== 主程式入口 ====================
 if __name__ == "__main__":
