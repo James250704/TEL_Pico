@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-# 檔案名稱: main.py
-# 功能: 接收來自遙控 Pico 的 UART 指令，控制麥克納姆輪平台與伺服馬達雲台
+# 檔案名稱: main_mecanum_only.py
+# 功能: 接收來自遙控 Pico 的 UART 指令，僅控制麥克納姆輪平台移動
 
 import utime
 from machine import Pin, PWM, Timer, UART, disable_irq, enable_irq
@@ -21,17 +21,15 @@ class HardwareConfig:
     # (PWM Pin, DIR Pin, Reversed)
     MOTOR_PINS = [
         (2, 3, False),  # 0: 左前輪 (LF)
-        (6, 7, True),  # 1: 右前輪 (RF)
+        (6, 7, False),  # 1: 右前輪 (RF)
         (10, 11, False),  # 2: 右後輪 (RR)
-        (4, 5, True),  # 3: 左後輪 (LR)
+        (4, 5, False),  # 3: 左後輪 (LR)
     ]
 
     # (Encoder A Pin)
     ENCODER_PINS = [12, 13, 14, 15]
 
-    # 伺服馬達雲台 Pin 腳
-    SERVO_PAN_PIN = 21  # 水平
-    SERVO_PITCH_PIN = 20  # 俯仰
+    # 原來的 SERVO 腳位已移除
 
 
 # --- 機器人參數 ---
@@ -47,16 +45,7 @@ class RobotParams:
     DEFAULT_MOTOR_SCALE = [1.0, 1.0, 1.0, 1.0]
 
 
-# --- 伺服馬達參數 ---
-class ServoParams:
-    PWM_FREQ = 50
-    MIN_PULSE_US = 500
-    MAX_PULSE_US = 2500
-    # 角度限制
-    PAN_MIN_ANGLE = -20  # 水平最小角度
-    PAN_MAX_ANGLE = 20  # 水平最大角度
-    PITCH_MIN_ANGLE = -90  # 俯仰最小角度
-    PITCH_MAX_ANGLE = 90  # 俯仰最大角度
+# ServoParams 已移除
 
 
 # ==================== PID 控制器 (與原版相同) ====================
@@ -136,47 +125,7 @@ class SafeEncoder:
         self.pin.irq(handler=None)
 
 
-# ==================== 伺服馬達雲台控制 ====================
-class ServoGimbal:
-    def __init__(self):
-        self.pwm_pan = PWM(Pin(HardwareConfig.SERVO_PAN_PIN))
-        self.pwm_pan.freq(ServoParams.PWM_FREQ)
-
-        self.pwm_pitch = PWM(Pin(HardwareConfig.SERVO_PITCH_PIN))
-        self.pwm_pitch.freq(ServoParams.PWM_FREQ)
-
-    def _angle_to_duty(self, angle: float) -> int:
-        """將角度轉換為 PWM duty"""
-        # 將角度映射到脈衝寬度
-        pulse_us = ServoParams.MIN_PULSE_US + ((angle + 90) / 180) * (
-            ServoParams.MAX_PULSE_US - ServoParams.MIN_PULSE_US
-        )
-        duty = int((pulse_us / (1_000_000 / ServoParams.PWM_FREQ)) * 65535)
-        return duty
-
-    def set_pan(self, pan_percent: float):
-        """設定水平伺服馬達位置 (-100 to 100)"""
-        # 將百分比轉換為角度
-        angle = (pan_percent / 100.0) * ServoParams.PAN_MAX_ANGLE
-        # 套用角度限制
-        angle = max(ServoParams.PAN_MIN_ANGLE, min(ServoParams.PAN_MAX_ANGLE, angle))
-        duty = self._angle_to_duty(angle)
-        self.pwm_pan.duty_u16(duty)
-
-    def set_pitch(self, pitch_percent: float):
-        """設定俯仰伺服馬達位置 (-100 to 100)"""
-        # 將百分比轉換為角度
-        angle = (pitch_percent / 100.0) * ServoParams.PITCH_MAX_ANGLE
-        # 套用角度限制
-        angle = max(
-            ServoParams.PITCH_MIN_ANGLE, min(ServoParams.PITCH_MAX_ANGLE, angle)
-        )
-        duty = self._angle_to_duty(angle)
-        self.pwm_pitch.duty_u16(duty)
-
-    def deinit(self):
-        self.pwm_pan.deinit()
-        self.pwm_pitch.deinit()
+# ServoGimbal 類別已移除
 
 
 # ==================== 麥克納姆輪機器人主類別 (與原版相似) ====================
@@ -262,10 +211,16 @@ class MecanumRobot:
         self.switch_ms = utime.ticks_ms()
 
     def apply_kinematics(self, vx: float, vy: float, omega: float):
-        lf = vy + vx + omega
-        rf = vy - vx - omega
-        rr = vy - vx + omega
-        lr = vy + vx - omega
+        # lf = vy + vx + omega
+        # rf = vy - vx - omega
+        # rr = vy - vx + omega
+        # lr = vy + vx - omega
+
+        lf = vx + vy + omega
+        rf = vx - vy - omega
+        rr = vx + vy - omega
+        lr = vx - vy + omega
+
         max_val = max(abs(lf), abs(rf), abs(rr), abs(lr))
         if max_val > 100.0:
             scale = 100.0 / max_val
@@ -287,13 +242,13 @@ class MecanumRobot:
 # ==================== 主程式入口 (最終版 - 使用緩衝區解決封包切割問題) ====================
 if __name__ == "__main__":
     robot = None
-    gimbal = None
+    # gimbal = None # 已移除
     try:
         # 1. 初始化硬體
         print("Initializing hardware...")  # 中文解釋: 正在初始化硬體...
         params = RobotParams()
         robot = MecanumRobot(params)
-        gimbal = ServoGimbal()
+        # gimbal = ServoGimbal() # 已移除
         led = Pin("LED", Pin.OUT)
 
         # 2. 初始化 UART 接收器
@@ -312,8 +267,6 @@ if __name__ == "__main__":
 
         # --- 主迴圈: 監聽 UART 指令並執行 ---
         while True:
-            # led.toggle() # 在高速迴圈中，LED閃爍會太快看不見，可以先關閉
-
             # 步驟 1: 盡可能快地將所有UART數據讀入緩衝區
             if comm_uart.any():
                 new_data = comm_uart.read()
@@ -335,15 +288,22 @@ if __name__ == "__main__":
                 try:
                     command = full_command_bytes.decode("utf-8").strip()
                     if command.startswith("CMD:"):
+                        # 注意：原始指令包含 pan, pitch, omega, vx, vy (共5個參數)
+                        # 由於伺服馬達已移除，我們只需要解析 vx, vy, omega，
+                        # 但為了與遙控板傳輸的格式保持兼容，我們仍需解析所有 5 個參數。
                         parts = command[4:].split(",")
                         if len(parts) == 5:
-                            pan, pitch, omega, vx, vy = [int(p.strip()) for p in parts]
-                            # print(f"Executing: vx={vx}, vy={vy}, omega={omega}, pan={pan}, pitch={pitch}") # 除錯時再打開
-                            robot.apply_kinematics(vx, vy, omega)
-                            gimbal.set_pan(pan)
-                            gimbal.set_pitch(pitch)
+                            # 忽略 pan 和 pitch，只取移動指令
+                            # pan, pitch, omega, vx, vy = [int(p.strip()) for p in parts]
+                            # 新解析方式：只關心 omega, vx, vy
+                            _, _, omega, vy, vx = [int(p.strip()) for p in parts]
+                            # print(
+                            #     f"Executing: vx={vx}, vy={vy}, omega={omega}"
+                            # )  # 除錯時再打開
+                            # 只呼叫機器人移動控制
+                            robot.apply_kinematics(-vx, -vy, omega)
                 except Exception as e:
-                    # print(f"Error processing command: {e}") # 除錯時再打開
+                    # print(f"Error processing command: {e}")  # 除錯時再打開
                     pass
 
             # 步驟 3: 將 sleep 時間大幅縮短或移除
@@ -355,6 +315,3 @@ if __name__ == "__main__":
         if robot:
             robot.deinit()
             print("Robot deinitialized.")  # 中文解釋: 機器人已取消初始化。
-        if gimbal:
-            gimbal.deinit()
-            print("Gimbal deinitialized.")  # 中文解釋: 雲台已取消初始化。

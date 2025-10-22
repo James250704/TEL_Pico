@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # 檔案名稱: remote_receiver.py
 # 功能: 專門接收 DBR4 遙控器訊號，並將指令透過 UART 傳送給主控 Pico
-# 版本: 1.4 (加入最終發送封包的打印功能)
+# 版本: 1.5 (優化 omega 處理的初始化狀態)
 
 from machine import Pin, UART
 import utime
@@ -52,7 +52,11 @@ class RemoteControlTransmitter:
         self.buf = bytearray(128)
         self.latest_channels = [CrsfConfig.RC_CENTER] * CrsfConfig.CHANNEL_NUM
 
+        # ==========================================================
+        # 【優化點】：確保 omega 的上次有效原始值初始化為中心點 (RC_CENTER=992)，
+        # 避免在啟動時因為與未定義/0 比較而觸發過濾器導致亂跳。
         self.last_valid_raw_omega = CrsfConfig.RC_CENTER
+        # ==========================================================
         self.last_final_omega = 0
 
         print("Remote receiver initialized.")
@@ -114,8 +118,10 @@ class RemoteControlTransmitter:
         change = abs(omega_raw - self.last_valid_raw_omega)
 
         if change > CrsfConfig.MAX_RAW_CHANGE_PER_STEP:
+            # 訊號跳變太大，可能是雜訊，保持上一個值
             omega = self.last_final_omega
         else:
+            # 訊號穩定，更新 omega 值
             omega = self._deadband(self._normalize(omega_raw))
             self.last_valid_raw_omega = omega_raw
             self.last_final_omega = omega
@@ -125,9 +131,9 @@ class RemoteControlTransmitter:
 
         command_string = f"CMD:{pan},{pitch},{omega},{vx},{vy}\n"
 
-        # ====================【新增：印出最終封包】====================
+        # ====================【印出最終封包】====================
         # .strip() 是為了讓序列埠監控的輸出更整潔，不影響實際發送的 "\n"
-        print(f"Final Packet Sent: {command_string.strip()}")
+        # print(f"Final Packet Sent: {command_string.strip()}")
         # ==========================================================
 
         # 透過 UART 發送給主控板
