@@ -1,23 +1,39 @@
-// 平台上升不進馬達程式
+/*
+ * 最終整合程式：平台馬達 H/L/S 控制
+ * (v2.0 - 抗抖動/Jitter 優化版)
+ *
+ * 功能:
+ * 1. 使用極速的 checkPicoCommands() 避免 String 緩存。
+ * 2. 僅在狀態改變時才設定馬達方向，避免在 loop 中增加延遲。
+ * 3. H/L/S 控制馬達，S 狀態保持鎖定。
+ */
 
-// 定義 XYZ 軸的 STEP 和 DIR 腳位
-// CNC Shield V3 預設的腳位定義
-const int stepPinX = 2; // X軸 步進腳位
-const int dirPinX = 5;  // X軸 方向腳位
-const int stepPinY = 3; // Y軸 步進腳位
-const int dirPinY = 6;  // Y軸 方向腳位
-const int stepPinZ = 4; // Z軸 步進腳位
-const int dirPinZ = 7;  // Z軸 方向腳位
+#include <SoftwareSerial.h>
+
+// === 1. 序列埠設定 ===
+const long DEBUG_BAUDRATE = 9600;
+const long PICO_BAUDRATE = 9600;
+const int PICO_RX_PIN = A0;
+const int PICO_TX_PIN = A1;
+SoftwareSerial picoSerial(PICO_RX_PIN, PICO_TX_PIN);
+
+// === 2. 馬達腳位定義 ===
+const int stepPinX = 2;
+const int dirPinX = 5;
+const int stepPinY = 3;
+const int dirPinY = 6;
+const int stepPinZ = 4;
+const int dirPinZ = 7;
 const int enablePin = 8;
 
-// 設定步進脈衝的延遲時間（決定速度）
-// 數值越小，速度越快。這裡設定 1000 微秒，即 1 毫秒
-const int stepDelay = 500;
+// === 3. 馬達參數 ===
+const int stepDelay = 500; // 來自您的 "可運作程式"
+const int DIR_DOWN = HIGH; // H 指令 (下降)
+const int DIR_UP = LOW;    // L 指令 (上升)
 
-// 設定方向。HIGH 或 LOW 決定了馬達的旋轉方向。
-// 您需要根據您的接線和馬達特性來測試哪個是「順時針」。
-// 這裡先設為 HIGH，如果方向不對，請將此值改為 LOW。
-const int motorDirection = HIGH; // HIGH 下降 LOW 上升
+// === 4. 狀態變數 ===
+char motorState = 'S';     // 當前馬達狀態 (H, L, S)
+char lastMotorState = 'S'; // 上一次的馬達狀態，用於偵測變化
 
 void setup() {
     // 設定所有腳位為 OUTPUT 模式
@@ -29,31 +45,103 @@ void setup() {
     pinMode(dirPinZ, OUTPUT);
     pinMode(enablePin, OUTPUT);
 
+    // 預設 enablePin 為 LOW (啟用/通電)
     digitalWrite(enablePin, LOW);
-    // 設定 XYZ 軸的旋轉方向
-    digitalWrite(dirPinX, motorDirection);
-    digitalWrite(dirPinY, motorDirection);
-    digitalWrite(dirPinZ, motorDirection);
 
-    // 初始化序列埠用於偵錯 (非必要，但建議)
-    Serial.begin(9600);
-    Serial.println("XYZ三軸馬達開始持續旋轉...");
+    // 初始化 "除錯" 序列埠
+    Serial.begin(DEBUG_BAUDRATE);
+    while(!Serial)
+        ;
+    Serial.println("--- 平台馬達 H/L/S 控制已啟動 (v2.0 - 抗抖動) ---");
+    Serial.println("馬達預設啟用 (通電鎖定)");
+    Serial.println("等待來自 Pico (A0) 的 H/L/S 指令...");
+
+    // 初始化 "Pico" 序列埠
+    picoSerial.begin(PICO_BAUDRATE);
 }
 
 void loop() {
-    // 輸出一個脈衝（HIGH）
-    digitalWrite(stepPinX, HIGH);
-    digitalWrite(stepPinY, HIGH);
-    digitalWrite(stepPinZ, HIGH);
+    // 1. 永遠先檢查指令 (這個函式現在超級快)
+    checkPicoCommands();
 
-    // 保持 HIGH 狀態一段時間
-    delayMicroseconds(stepDelay);
+    // 2. 執行馬達動作
+    runMotors();
+}
 
-    // 輸出第二個脈衝（LOW）
-    digitalWrite(stepPinX, LOW);
-    digitalWrite(stepPinY, LOW);
-    digitalWrite(stepPinZ, LOW);
+/**
+ * @brief (優化版) 極速檢查 Pico 指令
+ * - 不使用 String, 不使用 buffer
+ * - 立即反應 H, L, S
+ * - 忽略 '\n' 和其他字元
+ */
+void checkPicoCommands() {
+    // 只要有資料就讀取
+    if(picoSerial.available() > 0) {
+        // 讀取一個字元
+        char c = picoSerial.read();
 
-    // 保持 LOW 狀態一段時間，完成一個完整的步進脈衝
-    delayMicroseconds(stepDelay);
+        // 根據單一字元立即更新狀態
+        if(c == 'H') {
+            motorState = 'H';
+        } else if(c == 'L') {
+            motorState = 'L';
+        } else if(c == 'S') {
+            motorState = 'S';
+        }
+        // 我們完全忽略 'H' 'L' 'S' 以外的所有字元 (例如 '\n')
+    }
+}
+
+/**
+ * @brief (優化版) 根據 motorState 變數來驅動馬達
+ * - 僅在 motorState 發生 "改變" 時才設定方向
+ */
+void runMotors() {
+
+    // 偵測狀態是否 "剛剛" 發生改變
+    if(motorState != lastMotorState) {
+        // --- 狀態發生了變化 ---
+        if(motorState == 'H') {
+            // 剛切換到 H: 設定方向為 "下降"
+            Serial.println("狀態變更 -> H (下降)"); // 在此處除錯是安全的
+            digitalWrite(dirPinX, DIR_DOWN);
+            digitalWrite(dirPinY, DIR_DOWN);
+            digitalWrite(dirPinZ, DIR_DOWN);
+        } else if(motorState == 'L') {
+            // 剛切換到 L: 設定方向為 "上升"
+            Serial.println("狀態變更 -> L (上升)");
+            digitalWrite(dirPinX, DIR_UP);
+            digitalWrite(dirPinY, DIR_UP);
+            digitalWrite(dirPinZ, DIR_UP);
+        } else if(motorState == 'S') {
+            // 剛切換到 S: 停止
+            Serial.println("狀態變更 -> S (停止)");
+        }
+
+        // 更新 "上一次的狀態"
+        lastMotorState = motorState;
+    }
+
+    // --- 執行 "當前" 狀態的動作 ---
+    // (這個 if 區塊會被重複執行)
+
+    if(motorState == 'H' || motorState == 'L') {
+        // 狀態是 H 或 L:
+        // *** 這裡不再設定方向 ***
+        // 這裡只做一件事: 產生脈衝 (就像您的獨立測試程式一樣)
+
+        digitalWrite(stepPinX, HIGH);
+        digitalWrite(stepPinY, HIGH);
+        digitalWrite(stepPinZ, HIGH);
+        delayMicroseconds(stepDelay); // 500us
+
+        digitalWrite(stepPinX, LOW);
+        digitalWrite(stepPinY, LOW);
+        digitalWrite(stepPinZ, LOW);
+        delayMicroseconds(stepDelay); // 500us
+
+    } else {
+        // 狀態是 S:
+        // 不做任何事 (不發送脈衝)，馬達保持鎖定
+    }
 }
