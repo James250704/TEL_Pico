@@ -1,38 +1,30 @@
 # -*- coding: utf-8 -*-
-# 檔案名稱: main_mecanum_only.py
-# 功能: 接收來自遙控 Pico 的 UART 指令，僅控制麥克納姆輪平台移動
+# 檔案名稱: main_mecanum_working_debug.py
+# 功能: 接收 10 通道 UART 指令，使用正確的運動學模型和座標轉換
+#       並將原始字串透過 pin 8,9 UART 完整傳送出去
 
 import utime
 from machine import Pin, PWM, Timer, UART, disable_irq, enable_irq
 
-# ==================== 常數與設定 (Constants & Configuration) ====================
 
-
-# --- 與遙控 Pico 通訊的 UART 設定 ---
+# ==================== 常數與設定 ====================
 class CommConfig:
     UART_ID = 0
     BAUDRATE = 115200
-    TX_PIN_TO_REMOTE = 16  # 這個 TX 接到遙控板的 RX (備用)
-    RX_PIN_FROM_REMOTE = 17  # 這個 RX 要接到遙控板的 TX
+    TX_PIN_TO_REMOTE = 16
+    RX_PIN_FROM_REMOTE = 17
 
 
-# --- 機器人硬體設定 ---
 class HardwareConfig:
-    # (PWM Pin, DIR Pin, Reversed)
     MOTOR_PINS = [
-        (2, 3, False),  # 0: 左前輪 (LF)
-        (6, 7, False),  # 1: 右前輪 (RF)
-        (10, 11, False),  # 2: 右後輪 (RR)
-        (4, 5, False),  # 3: 左後輪 (LR)
+        (2, 3, False),  # 左前輪 (LF)
+        (6, 7, False),  # 右前輪 (RF)
+        (10, 11, False),  # 右後輪 (RR)
+        (4, 5, False),  # 左後輪 (LR)
     ]
-
-    # (Encoder A Pin)
     ENCODER_PINS = [12, 13, 14, 15]
 
-    # 原來的 SERVO 腳位已移除
 
-
-# --- 機器人參數 ---
 class RobotParams:
     CONTROL_DT_MS = 8
     PPR = 16
@@ -41,11 +33,7 @@ class RobotParams:
     PID_KD = 0.0
     PID_OUT_LIM = 50.0
     MAX_DUTY = 40000
-    # DEFAULT_MOTOR_SCALE = [1.0105, 0.9965, 0.9931, 1.0001]
     DEFAULT_MOTOR_SCALE = [1.0, 1.0, 1.0, 1.0]
-
-
-# ServoParams 已移除
 
 
 # ==================== PID 控制器 (與原版相同) ====================
@@ -125,10 +113,7 @@ class SafeEncoder:
         self.pin.irq(handler=None)
 
 
-# ServoGimbal 類別已移除
-
-
-# ==================== 麥克納姆輪機器人主類別 (與原版相似) ====================
+# ==================== 麥克納姆輪機器人主類別 ====================
 class MecanumRobot:
     def __init__(self, params: RobotParams):
         self.params = params
@@ -159,7 +144,7 @@ class MecanumRobot:
     def _timer_cb(self, t: Timer):
         self._scheduled_update(0)
 
-    # _scheduled_update 核心控制迴圈與原版完全相同
+    # _scheduled_update 核心控制迴圈 (與原版相同)
     def _scheduled_update(self, _arg):
         now = utime.ticks_us()
         dt = utime.ticks_diff(now, self._last_us) / 1_000_000.0
@@ -172,6 +157,7 @@ class MecanumRobot:
             self.rps_filtered[i] = (1 - self.RPS_FILTER_ALPHA) * self.rps_filtered[
                 i
             ] + self.RPS_FILTER_ALPHA * raw_rps[i]
+
         w = [abs(x) for x in self.base_cmd]
         sgn = [1 if x > 0 else (-1 if x < 0 else 0) for x in self.base_cmd]
         idx_pos = [i for i, val in enumerate(self.base_cmd) if val > 0]
@@ -210,16 +196,13 @@ class MecanumRobot:
         self.base_cmd = list(target_cmd)
         self.switch_ms = utime.ticks_ms()
 
+    # ====================【修正 1: 運動學公式】====================
+    # 套用 File 2 (正確的) 的運動學公式
     def apply_kinematics(self, vx: float, vy: float, omega: float):
-        # lf = vy + vx + omega
-        # rf = vy - vx - omega
-        # rr = vy - vx + omega
-        # lr = vy + vx - omega
-
         lf = vx + vy + omega
         rf = vx - vy - omega
         rr = vx + vy - omega
-        lr = vx - vy + omega
+        lr = vx - vy + omega  # <--- 已修正為 File 2 的版本
 
         max_val = max(abs(lf), abs(rf), abs(rr), abs(lr))
         if max_val > 100.0:
@@ -230,6 +213,8 @@ class MecanumRobot:
             lr *= scale
         self.set_command([int(lf), int(rf), int(rr), int(lr)])
 
+    # ==========================================================
+
     def deinit(self):
         if hasattr(self, "_timer"):
             self._timer.deinit()
@@ -239,79 +224,76 @@ class MecanumRobot:
             enc.deinit()
 
 
-# ==================== 主程式入口 (最終版 - 使用緩衝區解決封包切割問題) ====================
+# ==================== 主程式 ====================
 if __name__ == "__main__":
     robot = None
-    # gimbal = None # 已移除
     try:
-        # 1. 初始化硬體
-        print("Initializing hardware...")  # 中文解釋: 正在初始化硬體...
+        # 初始化硬體
         params = RobotParams()
         robot = MecanumRobot(params)
-        # gimbal = ServoGimbal() # 已移除
         led = Pin("LED", Pin.OUT)
 
-        # 2. 初始化 UART 接收器
+        # 接收 UART
         comm_uart = UART(
             CommConfig.UART_ID,
             baudrate=CommConfig.BAUDRATE,
             tx=Pin(CommConfig.TX_PIN_TO_REMOTE),
             rx=Pin(CommConfig.RX_PIN_FROM_REMOTE),
         )
-        print(
-            "Main controller ready. Waiting for commands..."
-        )  # 中文解釋: 主控制器已就緒，等待指令中...
 
-        # 建立一個空的位元組緩衝區來累積收到的資料
+        # 輸出 UART (用於 debug 轉發)
+        uart_out = UART(
+            1,
+            baudrate=CommConfig.BAUDRATE,
+            tx=Pin(8),
+            rx=Pin(9),
+        )
+
+        # ==================== 主迴圈 ====================
         command_buffer = b""
-
-        # --- 主迴圈: 監聽 UART 指令並執行 ---
+        pid_enabled = False
         while True:
-            # 步驟 1: 盡可能快地將所有UART數據讀入緩衝區
+            led.toggle()
             if comm_uart.any():
                 new_data = comm_uart.read()
                 if new_data:
                     command_buffer += new_data
 
-            # 步驟 2: 使用 "while" 迴圈，一次性處理完緩衝區中所有完整的指令
-            while True:
+            while b"\n" in command_buffer:
                 newline_pos = command_buffer.find(b"\n")
-                if newline_pos == -1:
-                    # 如果緩衝區中沒有找到換行符，代表沒有完整指令了，跳出內層迴圈
-                    break
-
-                # 提取一條完整指令
-                full_command_bytes = command_buffer[: newline_pos + 1]
-                # 從緩衝區移除已處理的指令
+                line_bytes = command_buffer[:newline_pos]
                 command_buffer = command_buffer[newline_pos + 1 :]
 
                 try:
-                    command = full_command_bytes.decode("utf-8").strip()
-                    if command.startswith("CMD:"):
-                        # 注意：原始指令包含 pan, pitch, omega, vx, vy (共5個參數)
-                        # 由於伺服馬達已移除，我們只需要解析 vx, vy, omega，
-                        # 但為了與遙控板傳輸的格式保持兼容，我們仍需解析所有 5 個參數。
-                        parts = command[4:].split(",")
-                        if len(parts) == 5:
-                            # 忽略 pan 和 pitch，只取移動指令
-                            # pan, pitch, omega, vx, vy = [int(p.strip()) for p in parts]
-                            # 新解析方式：只關心 omega, vx, vy
-                            _, _, omega, vy, vx = [int(p.strip()) for p in parts]
-                            # print(
-                            #     f"Executing: vx={vx}, vy={vy}, omega={omega}"
-                            # )  # 除錯時再打開
-                            # 只呼叫機器人移動控制
-                            robot.apply_kinematics(-vx, -vy, omega)
-                except Exception as e:
-                    # print(f"Error processing command: {e}")  # 除錯時再打開
+                    line_str = line_bytes.decode("utf-8").strip()
+                    parts = line_str.split(",")
+                    if len(parts) != 10:
+                        continue
+                    values = [int(p) for p in parts]
+
+                    # 轉發原始字串 (Debug 功能保留)
+                    uart_out.write(line_bytes + b"\n")
+
+                    # PID 開關控制 (第 8 個值，index 7)
+                    pid_enabled = True if values[7] else False
+                    robot.enable_pid = pid_enabled
+
+                    # ====================【修正 2: 座標系轉換】====================
+                    # 遙控器傳來的 10 個值
+                    vx_remote = values[0]
+                    vy_remote = values[1]
+                    omega_remote = values[9]
+                    print(f"vx={vx_remote}, vy={vy_remote}, omega={omega_remote}")
+                    robot.apply_kinematics(vx_remote, vy_remote, omega_remote)
+                    # ============================================================
+
+                except Exception:
                     pass
 
-            # 步驟 3: 將 sleep 時間大幅縮短或移除
-            utime.sleep_ms(0)  # 可嘗試 1 或 0
+            utime.sleep_ms(0)
 
     except KeyboardInterrupt:
-        print("\nProgram stopped by user.")  # 中文解釋: 使用者已停止程式。
+        pass
     finally:
         if robot:
             robot.deinit()
-            print("Robot deinitialized.")  # 中文解釋: 機器人已取消初始化。

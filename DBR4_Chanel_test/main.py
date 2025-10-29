@@ -77,3 +77,6 @@ while True:
         print("CH:", [normalize(c) for c in latest_channels[:10]])
 
         last = time.ticks_ms()
+
+# 0     1      2     3      4   5   6   7   8   9
+# 右水平 右垂直  左垂直 左水平  SA  SD  SB  SC  SE  SI
