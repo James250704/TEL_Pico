@@ -4,12 +4,13 @@
 
 ## 文件說明
 
--   main.py : 主要控制程式
--   CLI.py : 使用鍵盤控制
--   DBR4.py : 測試遙控器接收程式
--   motor.py : 無刷馬達測試
--   plat_motor : 伺服馬達測試
--   remote_recive : 從 DBR4 接收訊號並且發送訊號給 main
+-   Brushless_motor : 無刷馬達控制程式 (尚未決定 PICO 與通訊)
+-   CLI_move : 使用 CLI 控制移動平台
+-   DBR4_Chanel_test : DBR4 收訊頻道測試
+-   Lifting_platform : Arduino 升降平台程式
+-   Reciver : 收訊程式與發送訊號
+-   Remote_move : 移動平台控制程式
+-   Servo_motor : 伺服馬達控制程式(俯仰、水平)
 
 ## 接線圖
 
