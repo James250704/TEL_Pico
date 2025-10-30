@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # 檔案名稱: remote_receiver.py
 # 功能: 專門接收 DBR4 遙控器訊號，並將指令透過 UART 傳送給主控 Pico
-# 版本: 1.5 (優化 omega 處理的初始化狀態)
+# 版本: 1.7 (將跳變過濾器套用到所有 10 個通道，並修正過濾器邏輯)
 
 from machine import Pin, UART
 import utime
@@ -19,8 +19,14 @@ class CrsfConfig:
     CHANNEL_NUM = 16
     RC_CENTER = 992
     RC_RANGE = 820
-    RC_DEADBAND = 30
-    MAX_RAW_CHANGE_PER_STEP = 800
+    RC_DEADBAND = 20
+
+    # ====================【修改點 1】====================
+    # 降低閾值以捕捉更小的雜訊跳變
+    # 最小的雜訊 (CH5: -97 -> -72) 原始值跳變約 229
+    # 200 < 229，可以過濾掉所有日誌中的雜訊
+    MAX_RAW_CHANGE_PER_STEP = 200
+    # ====================================================
 
 
 class CommConfig:
@@ -52,12 +58,11 @@ class RemoteControlTransmitter:
         self.buf = bytearray(128)
         self.latest_channels = [CrsfConfig.RC_CENTER] * CrsfConfig.CHANNEL_NUM
 
-        # ==========================================================
-        # 【優化點】：確保 omega 的上次有效原始值初始化為中心點 (RC_CENTER=992)，
-        # 避免在啟動時因為與未定義/0 比較而觸發過濾器導致亂跳。
-        self.last_valid_raw_omega = CrsfConfig.RC_CENTER
-        # ==========================================================
-        self.last_final_omega = 0
+        # ====================【修改點 2】====================
+        # 將原本 omega 的追蹤變數改為 10 個通道的列表
+        self.last_valid_raw = [CrsfConfig.RC_CENTER] * 10
+        self.last_final = [0] * 10
+        # ====================================================
 
         print("Remote receiver initialized.")
         print(
@@ -104,37 +109,54 @@ class RemoteControlTransmitter:
     def _deadband(self, val: int) -> int:
         return 0 if abs(val) < CrsfConfig.RC_DEADBAND else val
 
+    # ====================【修改點 3】====================
+    # 將過濾器邏輯套用到所有 10 個通道
     def update_and_transmit(self):
         ch = self._poll_dbr4_uart()
         if ch:
             self.latest_channels = ch
 
-        vx = self._deadband(self._normalize(self.latest_channels[1]))
-        vy = self._deadband(self._normalize(self.latest_channels[0]))
-        pitch = self._deadband(self._normalize(self.latest_channels[2]))
-        pan = self._deadband(self._normalize(self.latest_channels[3]))
+        processed_values = []
 
-        omega_raw = self.latest_channels[9]
-        change = abs(omega_raw - self.last_valid_raw_omega)
+        # 迴圈處理 10 個通道
+        for i in range(10):
+            raw_val = self.latest_channels[i]
 
-        if change > CrsfConfig.MAX_RAW_CHANGE_PER_STEP:
-            # 訊號跳變太大，可能是雜訊，保持上一個值
-            omega = self.last_final_omega
-        else:
-            # 訊號穩定，更新 omega 值
-            omega = self._deadband(self._normalize(omega_raw))
-            self.last_valid_raw_omega = omega_raw
-            self.last_final_omega = omega
+            # 1. 計算與 "上次" 原始值的變化量
+            change = abs(raw_val - self.last_valid_raw[i])
 
-        # 為了除錯，暫時關閉之前的 omega debug print
-        # print(f"Omega Debug -> Raw CH9: {omega_raw}, Final Omega: {omega}")
+            # 2. 檢查變化量是否過大 (判斷為突波)
+            if change > CrsfConfig.MAX_RAW_CHANGE_PER_STEP:
+                # 變化太大，視為雜訊。
+                # *使用* 上次處理過的值 (self.last_final[i])
+                final_val = self.last_final[i]
+            else:
+                # 變化在允許範圍內 (正常操作或微小雜訊)
+                # *處理* 這次的新值
+                final_val = self._deadband(self._normalize(raw_val))
+                # 並更新「上次處理過的值」
+                self.last_final[i] = final_val
 
-        command_string = f"CMD:{pan},{pitch},{omega},{vx},{vy}\n"
+            # 3. 【關鍵邏輯】: *無論如何* 都要更新 "上次" 原始值
+            # 這樣才能在下一個循環中正確比較
+            # (如果是突波，下個循環會偵測到 "跳回來" 的巨大變化，再次過濾)
+            # (如果是開關，下個循環 change 會是 0，就會採用新值)
+            self.last_valid_raw[i] = raw_val
+
+            # 4. 將最終值存入列表
+            processed_values.append(final_val)
+
+        # 5. 將 10 個值轉換為字串並發送
+        command_string = ",".join(map(str, processed_values)) + "\n"
+
+        # ====================================================
 
         # ====================【印出最終封包】====================
-        # .strip() 是為了讓序列埠監控的輸出更整潔，不影響實際發送的 "\n"
-        # print(f"Final Packet Sent: {command_string.strip()}")
+        # print(f"{command_string.strip()}")
         # ==========================================================
+
+        # 0     1      2     3      4   5   6   7   8   9
+        # 右水平 右垂直  左垂直 左水平  SA  SD  SB  SC  SE  SI
 
         # 透過 UART 發送給主控板
         self.main_uart.write(command_string.encode("utf-8"))
