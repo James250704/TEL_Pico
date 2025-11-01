@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # 檔案名稱: remote_receiver.py
 # 功能: 專門接收 DBR4 遙控器訊號，並將指令透過 UART 傳送給主控 Pico
-# 版本: 1.7 (將跳變過濾器套用到所有 10 個通道，並修正過濾器邏輯)
+# 版本: 1.9 (為 CH9 設定 20 的死區，其餘通道設定 10 的死區)
 
 from machine import Pin, UART
 import utime
@@ -19,14 +19,18 @@ class CrsfConfig:
     CHANNEL_NUM = 16
     RC_CENTER = 992
     RC_RANGE = 820
-    RC_DEADBAND = 20
 
     # ====================【修改點 1】====================
-    # 降低閾值以捕捉更小的雜訊跳變
-    # 最小的雜訊 (CH5: -97 -> -72) 原始值跳變約 229
-    # 200 < 229，可以過濾掉所有日誌中的雜訊
-    MAX_RAW_CHANGE_PER_STEP = 200
+    # 設定不同的死區
+    RC_DEADBAND_DEFAULT = 3  # (中文：CH0-8 的預設死區)
+    RC_DEADBAND_CH9 = 15  # (中文：CH9 (旋轉) 的死區)
     # ====================================================
+
+    # 【v1.7】雜訊過濾閾值
+    MAX_RAW_CHANGE_PER_STEP = 200
+
+    # 【v1.8】Failsafe 逾時設定
+    FAILSAFE_TIMEOUT_MS = 500
 
 
 class CommConfig:
@@ -58,19 +62,24 @@ class RemoteControlTransmitter:
         self.buf = bytearray(128)
         self.latest_channels = [CrsfConfig.RC_CENTER] * CrsfConfig.CHANNEL_NUM
 
-        # ====================【修改點 2】====================
-        # 將原本 omega 的追蹤變數改為 10 個通道的列表
+        # 【v1.7】: 雜訊過濾器狀態
         self.last_valid_raw = [CrsfConfig.RC_CENTER] * 10
         self.last_final = [0] * 10
-        # ====================================================
+
+        # 【v1.8】: Failsafe 狀態變數
+        self.last_packet_time = utime.ticks_ms()
+        self.failsafe_active = False
 
         print("Remote receiver initialized.")
+        # (中文：遙控接收器已初始化。)
         print(
             f"Listening to DBR4 on UART {CrsfConfig.UART_ID} (RX:{CrsfConfig.RX_PIN_DBR4})"
         )
+        # (中文：正在 UART 0 (RX:17) 上監聽 DBR4 訊號)
         print(
             f"Transmitting commands on UART {CommConfig.UART_ID} (TX:{CommConfig.TX_PIN_TO_MAIN})"
         )
+        # (中文：正在 UART 1 (TX:8) 上傳送指令)
 
     def _parse_channels(self, data: memoryview):
         if len(data) < 22:
@@ -106,60 +115,84 @@ class RemoteControlTransmitter:
         )
         return int((val - CrsfConfig.RC_CENTER) * 100 / CrsfConfig.RC_RANGE)
 
-    def _deadband(self, val: int) -> int:
-        return 0 if abs(val) < CrsfConfig.RC_DEADBAND else val
+    # ====================【修改點 2】====================
+    # 函式簽名增加 channel_index 參數
+    def _deadband(self, val: int, channel_index: int) -> int:
+        """
+        根據通道索引套用不同的死區
+        CH9 (索引 9) 使用 20，其餘使用 10
+        """
+        if channel_index == 9:  # (中文：索引 9 對應到 CH9)
+            threshold = CrsfConfig.RC_DEADBAND_CH9
+        else:
+            threshold = CrsfConfig.RC_DEADBAND_DEFAULT
 
-    # ====================【修改點 3】====================
-    # 將過濾器邏輯套用到所有 10 個通道
+        return 0 if abs(val) < threshold else val
+
+    # ====================================================
+
     def update_and_transmit(self):
         ch = self._poll_dbr4_uart()
+
+        # 1. (v1.8) 檢查是否有新封包
         if ch:
             self.latest_channels = ch
+            self.last_packet_time = utime.ticks_ms()
+
+        # 2. (v1.8) 檢查 Failsafe 逾時
+        current_time = utime.ticks_ms()
+        time_since_last_packet = utime.ticks_diff(current_time, self.last_packet_time)
 
         processed_values = []
 
-        # 迴圈處理 10 個通道
-        for i in range(10):
-            raw_val = self.latest_channels[i]
+        if time_since_last_packet > CrsfConfig.FAILSAFE_TIMEOUT_MS:
+            # *** 進入 Failsafe 狀態 ***
+            if not self.failsafe_active:
+                print("FAILSAFE: RC signal lost. Setting all channels to 0.")
+                # (中文：Failsafe：遙控訊號遺失。將所有通道設為 0。)
+                self.failsafe_active = True
 
-            # 1. 計算與 "上次" 原始值的變化量
-            change = abs(raw_val - self.last_valid_raw[i])
+            processed_values = [0] * 10
+            self.last_valid_raw = [CrsfConfig.RC_CENTER] * 10
+            self.last_final = [0] * 10
 
-            # 2. 檢查變化量是否過大 (判斷為突波)
-            if change > CrsfConfig.MAX_RAW_CHANGE_PER_STEP:
-                # 變化太大，視為雜訊。
-                # *使用* 上次處理過的值 (self.last_final[i])
-                final_val = self.last_final[i]
-            else:
-                # 變化在允許範圍內 (正常操作或微小雜訊)
-                # *處理* 這次的新值
-                final_val = self._deadband(self._normalize(raw_val))
-                # 並更新「上次處理過的值」
-                self.last_final[i] = final_val
+        else:
+            # *** 訊號正常 ***
+            if self.failsafe_active:
+                print("FAILSAFE: RC signal recovered.")
+                # (中文：Failsafe：遙控訊號已恢復。)
+                self.failsafe_active = False
 
-            # 3. 【關鍵邏輯】: *無論如何* 都要更新 "上次" 原始值
-            # 這樣才能在下一個循環中正確比較
-            # (如果是突波，下個循環會偵測到 "跳回來" 的巨大變化，再次過濾)
-            # (如果是開關，下個循環 change 會是 0，就會採用新值)
-            self.last_valid_raw[i] = raw_val
+            # (v1.7) 迴圈處理 10 個通道
+            for i in range(10):
+                raw_val = self.latest_channels[i]
 
-            # 4. 將最終值存入列表
-            processed_values.append(final_val)
+                # (v1.7) 雜訊過濾
+                change = abs(raw_val - self.last_valid_raw[i])
 
-        # 5. 將 10 個值轉換為字串並發送
+                if change > CrsfConfig.MAX_RAW_CHANGE_PER_STEP:
+                    final_val = self.last_final[i]
+                else:
+                    # ====================【修改點 3】====================
+                    # 呼叫 _deadband 時，傳入通道索引 i
+                    normalized_val = self._normalize(raw_val)
+                    final_val = self._deadband(normalized_val, i)
+                    # ====================================================
+
+                    self.last_final[i] = final_val
+
+                self.last_valid_raw[i] = raw_val
+                processed_values.append(final_val)
+
+        # 3. 將 10 個值轉換為字串並發送
         command_string = ",".join(map(str, processed_values)) + "\n"
 
-        # ====================================================
+        self.main_uart.write(command_string.encode("utf-8"))
 
-        # ====================【印出最終封包】====================
-        # print(f"{command_string.strip()}")
-        # ==========================================================
+        print(f"{command_string.strip()}")
 
         # 0     1      2     3      4   5   6   7   8   9
         # 右水平 右垂直  左垂直 左水平  SA  SD  SB  SC  SE  SI
-
-        # 透過 UART 發送給主控板
-        self.main_uart.write(command_string.encode("utf-8"))
 
 
 # ==================== 主程式入口 ====================
@@ -174,6 +207,9 @@ if __name__ == "__main__":
             utime.sleep_ms(20)
         except KeyboardInterrupt:
             print("Program stopped.")
+            # (中文：程式已停止。)
             break
         except Exception as e:
             print(f"An error occurred: {e}")
+            # (中文：發生錯誤：{e})
+            utime.sleep_ms(1000)
