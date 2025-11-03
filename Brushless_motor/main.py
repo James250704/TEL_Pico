@@ -11,8 +11,8 @@ PWM_PIN1 = 15  # Motor 1 -> ESC1 signal
 # PWM_PIN2 = 14  # Motor 2 -> ESC2 signal
 
 # Throttle range
-MIN_DUTY_US = 1000  # stop
-MAX_DUTY_US = 2000  # full throttle
+MIN_DUTY_US = 500  # stop
+MAX_DUTY_US = 2500  # full throttle
 CALIBRATION_PULSE_US = 2000
 STOP_PULSE_US = 1000
 

@@ -118,11 +118,8 @@ class RemoteControlTransmitter:
     # ====================【修改點 2】====================
     # 函式簽名增加 channel_index 參數
     def _deadband(self, val: int, channel_index: int) -> int:
-        """
-        根據通道索引套用不同的死區
-        CH9 (索引 9) 使用 20，其餘使用 10
-        """
-        if channel_index == 9:  # (中文：索引 9 對應到 CH9)
+        # 根據通道索引套用不同的死區
+        if channel_index == 9:
             threshold = CrsfConfig.RC_DEADBAND_CH9
         else:
             threshold = CrsfConfig.RC_DEADBAND_DEFAULT
