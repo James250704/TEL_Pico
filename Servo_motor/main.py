@@ -1,12 +1,10 @@
-# 雙軸伺服馬達控制程式 (修改版：整合 UART 遙控)
+# 僅保留水平伺服馬達控制程式 (整合 UART 遙控)
 
 import utime
 from machine import Pin, PWM, UART
 
 # --- 伺服馬達基本設定 ---
-# 設定兩顆伺服馬達的訊號腳位
 SERVO_PAN_PIN = 21  # 水平 Pan 伺服馬達
-SERVO_PITCH_PIN = 20  # 俯仰 Pitch 伺服馬達
 
 PWM_FREQ = 50
 
@@ -19,13 +17,7 @@ PAN_CALIBRATION_0_DEG = 10
 PAN_CALIBRATION_90_DEG = 97
 PAN_CALIBRATION_180_DEG = 185
 
-# --- 俯仰馬達 (Pitch) 的校準數據 ---
-PITCH_CALIBRATION_0_DEG = 0
-PITCH_CALIBRATION_90_DEG = 90
-PITCH_CALIBRATION_180_DEG = 180
-
-# ==================== 新增：UART 接收設定 ====================
-# 必須與「發訊號程式」中的 CommConfig 一致
+# ==================== UART 接收設定 ====================
 UART_ID = 0
 UART_BAUDRATE = 115200
 UART_RX_PIN = 17  # 用於接收訊號 (對應發訊號程式的 TX 8)
@@ -41,9 +33,6 @@ uart_buffer = bytearray()
 pwm_pan = PWM(Pin(SERVO_PAN_PIN))
 pwm_pan.freq(PWM_FREQ)
 
-pwm_pitch = PWM(Pin(SERVO_PITCH_PIN))
-pwm_pitch.freq(PWM_FREQ)
-
 
 # --- 內部輔助函式 ---
 def _raw_value_to_duty(raw_val: float) -> int:
@@ -55,7 +44,7 @@ def _raw_value_to_duty(raw_val: float) -> int:
     return duty
 
 
-# ==================== 新增：數值映射函式 ====================
+# ==================== 數值映射函式 ====================
 def map_value(value, in_min, in_max, out_min, out_max):
     """
     將一個值從一個範圍線性映射到另一個範圍。
@@ -87,38 +76,16 @@ def set_pan_angle(angle: float):
     # print(f"Pan Angle: {angle:.1f} -> Raw: {raw_value:.2f} -> Duty: {duty_value}")
 
 
-def set_pitch_angle(angle: float):
-    """
-    設定俯仰 (Pitch) 伺服馬達的角度。輸入範圍: -20 到 20。
-    """
-    # *** 根據您原有的程式，限制在 -20 到 20 度之間 ***
-    angle = max(-20, min(20, angle))
-
-    # 使用俯仰馬達的校準數據進行映射
-    in_min, in_max = -90, 90
-    out_min, out_max = PITCH_CALIBRATION_180_DEG, PITCH_CALIBRATION_0_DEG
-
-    raw_value = (angle - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
-    duty_value = _raw_value_to_duty(raw_value)
-    pwm_pitch.duty_u16(duty_value)
-
-    # 為了避免洗版，您可以考慮註解掉這個 print
-    # print(f"Pitch Angle: {angle:.1f} -> Raw: {raw_value:.2f} -> Duty: {duty_value}")
-
-
-# ==================== 修改：主程式 (UART 迴圈) ====================
+# ==================== 主程式 (UART 迴圈) ====================
 
 try:
-    print(
-        f"Starting dual servo controller (Pan: GP{SERVO_PAN_PIN}, Pitch: GP{SERVO_PITCH_PIN})"
-    )
+    print(f"Starting horizontal servo controller (Pan: GP{SERVO_PAN_PIN})")
     print(
         f"Listening for commands on UART {UART_ID} (RX: GP{UART_RX_PIN}) at {UART_BAUDRATE} baud."
     )
 
-    # 初始時先將兩顆馬達歸中
+    # 初始時先將馬達歸中
     set_pan_angle(0)
-    set_pitch_angle(0)
     led = Pin("LED", Pin.OUT)
 
     while True:
@@ -151,23 +118,18 @@ try:
                         # 預期格式: "ch0,ch1,ch2,ch3,..."
                         parts = line_str.split(",")
 
+                        # 根據 DBR4 規格，CH3 (索引 3) 控制雲台
                         # 確保至少有 4 個通道 (索引 0, 1, 2, 3)
                         if len(parts) >= 4:
-                            # CH2 (index 2) -> 俯仰 (Pitch)
                             # CH3 (index 3) -> 水平 (Pan)
-                            ch2_val = int(parts[2])  # 俯仰
                             ch3_val = int(parts[3])  # 水平
 
                             # 4. 映射數值到角度
                             # ch3 (Pan): -100 to 100 -> -90 to 90
                             pan_angle = map_value(ch3_val, -100, 100, -90, 90)
 
-                            # ch2 (Pitch): -100 to 100 -> -20 to 20 (根據 set_pitch_angle 內的限制)
-                            pitch_angle = map_value(ch2_val, -100, 100, -20, 20)
-
                             # 5. 控制伺服馬達
                             set_pan_angle(pan_angle)
-                            set_pitch_angle(pitch_angle)
 
                         else:
                             print(f"Received incomplete data: {line_str}")
@@ -187,7 +149,6 @@ finally:
     # 程式結束時，關閉所有 PWM 輸出
     print("Deinitializing PWM and UART...")
     pwm_pan.deinit()
-    pwm_pitch.deinit()
     uart.deinit()
     print("Cleanup complete. Exiting.")
 
