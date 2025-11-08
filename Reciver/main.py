@@ -178,6 +178,9 @@ class RemoteControlTransmitter:
 
                     self.last_final[i] = final_val
 
+                if i == 6:  # CH6 (SB)
+                    final_val = -final_val
+
                 self.last_valid_raw[i] = raw_val
                 processed_values.append(final_val)
 
