@@ -67,13 +67,6 @@ while True:
 
     # 每 20 ms 更新一次輸出
     if time.ticks_diff(time.ticks_ms(), last) > 20:
-
-        # rx = normalize(latest_channels[0])
-        # ry = normalize(latest_channels[1])
-        # lx = normalize(latest_channels[2])
-        # ly = normalize(latest_channels[3])
-        # ch5 SA ch6 SB ch7 SC ch8 SD ch9 SI
-        # print(f"Right: ({rx},{ry}), Left: ({lx},{ly})")
         print("CH:", [normalize(c) for c in latest_channels[:10]])
 
         last = time.ticks_ms()
