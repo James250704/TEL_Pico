@@ -1,4 +1,4 @@
-// CNC Shield 平台升降控制程式 (修正 EMI 噪音版)
+// CNC Shield 平台升降控制程式 (最終修正版)
 
 #define X_STEP_PIN 2
 #define X_DIR_PIN 5
@@ -10,8 +10,8 @@
 
 #define LIMIT_PIN_TOP 11 // Z-Limit 接腳 (D11)
 
-#define DIR_UP HIGH
-#define DIR_DOWN LOW
+#define DIR_UP LOW
+#define DIR_DOWN HIGH
 
 const int STEP_DELAY = 500; // 微秒，步進速度
 bool stepState = LOW;
@@ -21,21 +21,21 @@ char motorState = 'S'; // H (上) / S (停) / L (下)
 String uartBuffer = "";
 const int BUF_MAX = 60;
 
-// --- 新增：抗 EMI 噪音的讀取函式 ---
-// 透過短暫延遲和二次確認來過濾噪音
+// --- *** 已修正 *** 抗 EMI 噪音的讀取函式 (邏輯更正) ---
 bool isTopLimitPressed_Debounced() {
     // 第一次讀取
     if(digitalRead(LIMIT_PIN_TOP) == HIGH) {
-        return false; // 如果是 HIGH，肯定未按壓
+        return false; // 讀到 HIGH (未按壓)，直接返回 false (未按壓)
     }
 
-    // 第一次讀到 LOW，可能是雜訊
-    delayMicroseconds(150); // 關鍵：等待 150 微秒，讓噪音過去
+    // 第一次讀到 LOW (可能已按壓，也可能是噪音)
+    delayMicroseconds(150); // 關鍵：等待 150 微秒
 
     // 第二次讀取
-    return (digitalRead(LIMIT_PIN_TOP) == LOW); // 以第二次的讀取為準
+    // 如果仍然是 LOW，才確認為 "已按壓" (true)
+    return (digitalRead(LIMIT_PIN_TOP) == LOW);
 }
-// ------------------------------------
+// -------------------------------------------------
 
 void setup() {
     pinMode(X_STEP_PIN, OUTPUT);
@@ -50,7 +50,7 @@ void setup() {
 
     digitalWrite(ENABLE_PIN, HIGH); // 初始斷電
     Serial.begin(115200);
-    // Serial.println("=== CNC Shield 自動控制啟動 (抗EMI版) ===");
+    Serial.println("=== CNC Shield 自動控制啟動 (已修正) ===");
 }
 
 void loop() {
@@ -58,7 +58,7 @@ void loop() {
     runMotors();
 }
 
-// --- 從 RX0 讀取 Pico (*** 此函式已修改 ***) ---
+// --- 從 RX0 讀取 Pico (*** 正確邏輯 ***) ---
 void readPico() {
     while(Serial.available() > 0) {
         char c = Serial.read();
@@ -67,21 +67,19 @@ void readPico() {
             if(uartBuffer.length() > 0) {
                 int ch6 = parseCH6(uartBuffer);
 
-                // --- 邏輯修改：使用 "抗噪音" 函式檢查 ---
+                // --- 邏輯修正：使用 "正確" 的函式檢查 ---
                 bool topLimitPressed = isTopLimitPressed_Debounced();
+                // Serial.println(topLimitPressed); // 除錯用，按壓時應顯示 1
 
-                // 這是您加入的除錯行
-                // Serial.println(topLimitPressed);
-
-                if(ch6 <= -21) {
-                    if(topLimitPressed) {
-                        motorState = 'S';
-                    } else {
-                        motorState = 'H';
+                if(ch6 <= -21) {          // 收到 "向上" (H) 指令
+                    if(topLimitPressed) { // 如果 "已按壓" (true)
+                        motorState = 'S'; // 就停止
+                    } else {              // 如果 "未按壓" (false)
+                        motorState = 'H'; // 才允許向上
                     }
-                } else if(ch6 >= 21) {
-                    motorState = 'L';
-                } else {
+                } else if(ch6 >= 21) { // 收到 "向下" (L) 指令
+                    motorState = 'L';  // 向下時，不受頂部限位開關影響
+                } else {               // 收到 "停止" (S) 指令
                     motorState = 'S';
                 }
                 // ----------------------------------------
@@ -112,14 +110,14 @@ int parseCH6(String data) {
     return 0;
 }
 
-// --- 步進馬達控制 (*** 此函式已修改 ***) ---
+// --- 步進馬達控制 (*** 正確邏輯 ***) ---
 void runMotors() {
     unsigned long now = micros();
 
-    // --- 即時安全檢查：使用 "抗噪音" 函式 ---
-    if(motorState == 'L' && isTopLimitPressed_Debounced()) {
+    // --- 即時安全檢查：檢查 "運行中" 且 "向上 H" 時，是否撞到開關 ---
+    if(motorState == 'H' && isTopLimitPressed_Debounced()) {
         motorState = 'S'; // 強制停止
-        // Serial.println("!! 運行中觸發頂部限位，馬達停止 !!");
+        Serial.println("!! 運行中觸發頂部限位，馬達停止 !!");
     }
     // ------------------------------------------------
 
