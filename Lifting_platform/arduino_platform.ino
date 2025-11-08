@@ -23,17 +23,10 @@ const int BUF_MAX = 60;
 
 // --- *** 已修正 *** 抗 EMI 噪音的讀取函式 (邏輯更正) ---
 bool isTopLimitPressed_Debounced() {
-    // 第一次讀取
-    if(digitalRead(LIMIT_PIN_TOP) == HIGH) {
-        return false; // 讀到 HIGH (未按壓)，直接返回 false (未按壓)
-    }
-
-    // 第一次讀到 LOW (可能已按壓，也可能是噪音)
-    delayMicroseconds(150); // 關鍵：等待 150 微秒
-
-    // 第二次讀取
-    // 如果仍然是 LOW，才確認為 "已按壓" (true)
-    return (digitalRead(LIMIT_PIN_TOP) == LOW);
+    if(digitalRead(LIMIT_PIN_TOP) != HIGH)
+        return false; // 第一次不是 HIGH → 沒壓
+    delayMicroseconds(150);
+    return (digitalRead(LIMIT_PIN_TOP) == HIGH); // 第二次確認仍是 HIGH → 壓下
 }
 // -------------------------------------------------
 
@@ -50,7 +43,7 @@ void setup() {
 
     digitalWrite(ENABLE_PIN, HIGH); // 初始斷電
     Serial.begin(115200);
-    Serial.println("=== CNC Shield 自動控制啟動 (已修正) ===");
+    // Serial.println("=== CNC Shield 自動控制啟動 (已修正) ===");
 }
 
 void loop() {
@@ -71,15 +64,15 @@ void readPico() {
                 bool topLimitPressed = isTopLimitPressed_Debounced();
                 // Serial.println(topLimitPressed); // 除錯用，按壓時應顯示 1
 
-                if(ch6 <= -21) {          // 收到 "向上" (H) 指令
-                    if(topLimitPressed) { // 如果 "已按壓" (true)
-                        motorState = 'S'; // 就停止
-                    } else {              // 如果 "未按壓" (false)
-                        motorState = 'H'; // 才允許向上
+                if(ch6 <= -41) { // 遙控器「往上」→ 平台往上
+                    if(isTopLimitPressed_Debounced()) {
+                        motorState = 'S'; // 壓到頂 → 停
+                    } else {
+                        motorState = 'H'; // 允許往上
                     }
-                } else if(ch6 >= 21) { // 收到 "向下" (L) 指令
-                    motorState = 'L';  // 向下時，不受頂部限位開關影響
-                } else {               // 收到 "停止" (S) 指令
+                } else if(ch6 >= 41) { // 遙控器「往下」→ 平台往下
+                    motorState = 'L';  // 往下永遠允許
+                } else {
                     motorState = 'S';
                 }
                 // ----------------------------------------
@@ -117,7 +110,7 @@ void runMotors() {
     // --- 即時安全檢查：檢查 "運行中" 且 "向上 H" 時，是否撞到開關 ---
     if(motorState == 'H' && isTopLimitPressed_Debounced()) {
         motorState = 'S'; // 強制停止
-        Serial.println("!! 運行中觸發頂部限位，馬達停止 !!");
+        // Serial.println("!! 運行中觸發頂部限位，馬達停止 !!");
     }
     // ------------------------------------------------
 
