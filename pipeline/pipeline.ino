@@ -5,7 +5,7 @@
 #define X_DIR_PIN 5
 #define ENABLE_PIN 8 // Active LOW
 
-#define DIR_TEST_DIRECTION LOW // LOW = DIR_UP, HIGH = DIR_DOWN
+#define DIR_TEST_DIRECTION HIGH // LOW = DIR_UP, HIGH = DIR_DOWN
 
 const int STEP_DELAY = 550; // 微秒，步進速度 (已加速)
 
