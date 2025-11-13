@@ -8,7 +8,7 @@ from machine import Pin, PWM, UART
 import utime
 
 # ==================== 硬體腳位設定 (Hardware Pinout) ====================
-UART_ID = 1
+UART_ID = 0
 UART_BAUDRATE = 115200
 UART_RX_PIN = 17
 
@@ -21,7 +21,7 @@ ESC_PIN_2 = 14
 PWM_FREQ_SERVO = 50
 SERVO_MIN_PULSE_US = 500
 SERVO_MAX_PULSE_US = 2500
-PAN_CALIBRATION_0_DEG = 30
+PAN_CALIBRATION_0_DEG = 45
 PAN_CALIBRATION_90_DEG = 90
 PAN_CALIBRATION_180_DEG = 150
 
@@ -97,7 +97,7 @@ def run_controller():
 
         # --- 2. 初始狀態 ---
         set_pan_angle(0)
-        current_esc_speed = 70
+        current_esc_speed = 50
         set_esc_speed(pwm_esc1, current_esc_speed)
         set_esc_speed(pwm_esc2, current_esc_speed)
         print("Servo centered. ESCs set to initial speed (70%).")
@@ -123,7 +123,7 @@ def run_controller():
 
                             # ====================【修改點 2】====================
                             # (新增) 只在訊號正確時印出
-                            print(f"Received OK: {command_string}")
+                            # print(f"Received OK: {command_string}")
 
                             # --- A. 伺服馬達 (CH3) ---
                             try:

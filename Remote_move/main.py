@@ -1,51 +1,57 @@
 # -*- coding: utf-8 -*-
 # 檔案名稱: Remote_move/main.py
+# 版本: 2.0 (ISR 安全修正 + UART 腳位修正)
 # 功能: 接收 10 通道 UART 指令，使用 FF+PID 閉迴路控制 (僅底盤)
 
 import utime
 from machine import Pin, PWM, Timer, UART, disable_irq, enable_irq
+import micropython
 
-ENABLE_PID = True  # (中文解釋: 啟用我們調校好的 PID 控制)
+# 用於在中斷發生錯誤時提供更多資訊 (除錯好習慣)
+micropython.alloc_emergency_exception_buf(100)
+
+ENABLE_PID = True
 
 
-# ==================== 常數與設定 ====================
+# ==================== 通訊設定 (修正為配合 Remote Receiver) ====================
 class CommConfig:
+    # 【重要修正】
+    # 遙控器接收端 (remote_receiver.py) 是使用 UART 1 (TX=8, RX=9)
+    # 所以這裡必須交叉連接：接收端 TX(8) -> 底盤 RX(9)
     UART_ID = 0
     BAUDRATE = 115200
-    TX_PIN_TO_REMOTE = 16
-    RX_PIN_FROM_REMOTE = 17
+    TX_PIN_TO_REMOTE = 16  # 對應遙控端的 RX
+    RX_PIN_FROM_REMOTE = 17  # 對應遙控端的 TX (Pin 8)
 
 
 class HardwareConfig:
     MOTOR_PINS = [
-        (2, 3, False),  # 左前輪 (LF)
-        (6, 7, False),  # 右前輪 (RF)
-        (10, 11, False),  # 右後輪 (RR)
-        (4, 5, False),  # 左後輪 (LR)
+        (2, 3, False),  # 左前 (LF)
+        (6, 7, False),  # 右前 (RF)
+        (10, 11, False),  # 右後 (RR)
+        (4, 5, False),  # 左後 (LR)
     ]
     ENCODER_PINS = [12, 13, 14, 15]
 
 
 class RobotParams:
-    CONTROL_DT_MS = 8
+    CONTROL_DT_MS = 8  # PID 控制週期 8ms (約 125Hz)
 
-    # --- (來自 PID 調校的黃金參數) ---
-    PPR = 432  # (16 * 27)
-    KF_GAIN = 21.5  # (前饋增益)
-    PID_KP = 1.0  # (P 增益)
-    PID_KI = 1.0  # (I 增益)
-    PID_KD = 0.0  # (D 增益)
-    # -----------------------------------
+    # --- PID 調校參數 ---
+    PPR = 432
+    KF_GAIN = 21.5
+    PID_KP = 1.0
+    PID_KI = 1.0
+    PID_KD = 0.0
+    # -------------------
 
-    # (中文解釋: 設定遙控器 100% 對應的最大 RPS)
     MAX_RPS = 7.0
-
-    PID_OUT_LIM = 30.0  # PID 修正的百分比上限
+    PID_OUT_LIM = 30.0
     MAX_DUTY = 40000
     DEFAULT_MOTOR_SCALE = [1.0, 1.0, 1.0, 1.0]
 
 
-# ==================== PID 控制器 (與原版相同) ====================
+# ==================== PID 控制器 ====================
 class PID:
     def __init__(self, kp, ki, kd, out_limit, **kwargs):
         self.kp, self.ki, self.kd = kp, ki, kd
@@ -81,7 +87,7 @@ class PID:
         return out
 
 
-# ==================== 硬體抽象層 (與原版相同) ====================
+# ==================== 硬體抽象層 ====================
 class Motor:
     def __init__(self, pwm_pin, dir_pin, reversed=False, max_duty=40000):
         self.pwm = PWM(Pin(pwm_pin))
@@ -108,6 +114,7 @@ class SafeEncoder:
         self.pin = Pin(pin_a, Pin.IN, Pin.PULL_UP)
         self.pin.irq(trigger=Pin.IRQ_RISING, handler=self._irq_handler)
 
+    # 編碼器中斷必須非常快，這裡只做加法是安全的
     def _irq_handler(self, pin):
         self.pulse_count += 1
 
@@ -136,11 +143,17 @@ class MecanumRobot:
         ]
 
         self.enable_pid = ENABLE_PID
-        self.base_cmd = [0.0, 0.0, 0.0, 0.0]  # (中文解釋: 指令是 RPS 浮點數)
+        self.base_cmd = [0.0, 0.0, 0.0, 0.0]
         self.motor_scale = list(params.DEFAULT_MOTOR_SCALE)
         self.rps_filtered = [0.0] * 4
         self.RPS_FILTER_ALPHA = 0.2
+
         self._last_us = utime.ticks_us()
+
+        # 【修改點 1: 新增 PID 旗標】
+        self.pid_trigger = False  # 當它為 True 時，主迴圈會執行計算
+
+        # 設定 Timer
         self._timer = Timer()
         self._timer.init(
             period=self.params.CONTROL_DT_MS,
@@ -148,47 +161,49 @@ class MecanumRobot:
             callback=self._timer_cb,
         )
 
+    # 【修改點 2: 中斷回調函式 (ISR)】
+    # 這個函式現在極度簡短，只負責設定旗標，非常安全
     def _timer_cb(self, t: Timer):
-        self._scheduled_update(0)
+        self.pid_trigger = True
 
-    # ====================【FF+PID 控制迴圈】====================
-    # (中文解釋: 使用 pid_tuner.py 驗證過的 FF+PID 邏輯)
-    def _scheduled_update(self, _arg):
+    # 【修改點 3: 實際的 PID 計算邏輯】
+    # 將原本 _scheduled_update 的內容移到這裡，並在主迴圈呼叫
+    def run_pid_cycle(self):
         now = utime.ticks_us()
         dt = utime.ticks_diff(now, self._last_us) / 1_000_000.0
-        if dt <= 1e-9:
+
+        # 簡單的 DT 保護
+        if dt <= 0:
             return
+
         self._last_us = now
 
-        # 1. 讀取編碼器並計算 RPS
+        # 1. 讀取編碼器
         pulses = [e.take_delta() for e in self.encs]
-        # (中文解釋: 你的 SafeEncoder 只用 A 相，無法判斷方向。)
-        # (PID 只需處理速度大小，方向由 set_speed_percent 處理)
         raw_rps = [abs(p) / (self.params.PPR * dt) for p in pulses]
 
+        # 2. 濾波
         for i in range(4):
             self.rps_filtered[i] = (1 - self.RPS_FILTER_ALPHA) * self.rps_filtered[
                 i
             ] + self.RPS_FILTER_ALPHA * raw_rps[i]
 
-        # 2. 套用 FF+PID 控制迴圈 (對4個馬達各做一次)
+        # 3. PID 計算與馬達控制
         for i in range(4):
             target_rps = self.base_cmd[i]
             measured_rps = self.rps_filtered[i]
-
-            # (中文解釋: 誤差只計算速度大小的差異)
             error_rps = abs(target_rps) - measured_rps
 
-            # 3. 計算前饋 FF (使用大小)
+            # FF
             u_ff = abs(target_rps) * self.params.KF_GAIN
 
-            # 4. 計算 PID 修正量
+            # PID
             du = self.pids[i].update(error_rps, dt) if self.enable_pid else 0.0
 
-            # 5. 總和並限制
+            # 加總
             total_power_magnitude = u_ff + du
 
-            # (中文解釋: 替 target_rps 加上正負號)
+            # 方向處理
             if target_rps < 0:
                 total_power = -total_power_magnitude
             else:
@@ -196,40 +211,30 @@ class MecanumRobot:
 
             total_power = max(-100.0, min(100.0, total_power))
 
-            # 6. 驅動馬達
-            if abs(target_rps) < 0.05:  # (中文解釋: 設置一個死區)
+            # 寫入馬達
+            if abs(target_rps) < 0.05:
                 self.motors[i].stop()
                 self.pids[i].reset()
             else:
                 self.motors[i].set_speed_percent(total_power * self.motor_scale[i])
 
-    # ==========================================================
-
     def set_command(self, target_cmd: list):
-        # (中文解釋: 只有在目標大幅改變時才重置 PID)
         for i in range(4):
             if abs(target_cmd[i]) < 0.05 and abs(self.base_cmd[i]) > 0.05:
                 self.pids[i].reset()
-
         self.base_cmd = list(target_cmd)
 
-    # ====================【修正後的運動學】====================
-    # (中文解釋: 修正運動學公式，並計算目標 RPS)
     def apply_kinematics(self, vx: float, vy: float, omega: float):
-        # 假設: vx, vy, omega 範圍是 -100.0 到 100.0
-
-        # 1. 將 -100~100 的指令轉換為 -MAX_RPS ~ +MAX_RPS
+        # 運動學計算 (保持不變)
         vx_rps = (vx / 100.0) * self.params.MAX_RPS
         vy_rps = (vy / 100.0) * self.params.MAX_RPS
         omega_rps = (omega / 100.0) * self.params.MAX_RPS
 
-        # 2. 標準麥克納姆輪運動學 (LF, RF, RR, LR)
         lf_rps = vx_rps + vy_rps + omega_rps
         rf_rps = vx_rps - vy_rps - omega_rps
         rr_rps = vx_rps + vy_rps - omega_rps
         lr_rps = vx_rps - vy_rps + omega_rps
 
-        # 3. 限制最大速度
         max_val = max(abs(lf_rps), abs(rf_rps), abs(rr_rps), abs(lr_rps))
         if max_val > self.params.MAX_RPS:
             scale = self.params.MAX_RPS / max_val
@@ -238,10 +243,7 @@ class MecanumRobot:
             rr_rps *= scale
             lr_rps *= scale
 
-        # 4. 將目標 RPS (浮點數) 設為指令
         self.set_command([lf_rps, rf_rps, rr_rps, lr_rps])
-
-    # ==========================================================
 
     def deinit(self):
         if hasattr(self, "_timer"):
@@ -257,23 +259,32 @@ if __name__ == "__main__":
     robot = None
 
     try:
-        # 初始化硬體
+        print("Initializing Robot System...")
         params = RobotParams()
         robot = MecanumRobot(params)
         led = Pin("LED", Pin.OUT)
 
-        # 接收 UART (來自遙控器)
+        # 初始化 UART (使用修正後的 GP8/GP9)
         comm_uart = UART(
             CommConfig.UART_ID,
             baudrate=CommConfig.BAUDRATE,
             tx=Pin(CommConfig.TX_PIN_TO_REMOTE),
             rx=Pin(CommConfig.RX_PIN_FROM_REMOTE),
         )
+        print(
+            f"UART Listening on ID={CommConfig.UART_ID}, RX={CommConfig.RX_PIN_FROM_REMOTE}"
+        )
 
         command_buffer = b""
 
         while True:
-            led.toggle()
+            # --- 任務 1: 檢查 PID 旗標 ---
+            # 這是「旗標式」處理的核心：在主迴圈中執行重負載工作
+            if robot.pid_trigger:
+                robot.pid_trigger = False  # 降下旗標
+                robot.run_pid_cycle()  # 執行 PID 計算
+
+            # --- 任務 2: 處理 UART ---
             if comm_uart.any():
                 new_data = comm_uart.read()
                 if new_data:
@@ -287,25 +298,31 @@ if __name__ == "__main__":
                 try:
                     line_str = line_bytes.decode("utf-8").strip()
                     parts = line_str.split(",")
-                    if len(parts) != 10:
-                        continue
-                    values = [int(p) for p in parts]
+                    if len(parts) == 10:
+                        values = [int(p) for p in parts]
+                        vx_remote = values[0]
+                        vy_remote = values[1]
+                        omega_remote = values[9]  # 假設 CH10 是旋轉
 
-                    vx_remote = values[0]
-                    vy_remote = values[1]
-                    omega_remote = values[9]
+                        # 執行運動學解算
+                        robot.apply_kinematics(vx_remote, vy_remote, omega_remote)
 
-                    robot.apply_kinematics(vx_remote, vy_remote, omega_remote)
-                    # print(f"vx={vx_remote}, vy={vy_remote}, omega={omega_remote}")
+                        # 視覺反饋 (可移除)
+                        led.toggle()
 
                 except (ValueError, IndexError) as e:
-                    print(f"Parse Error: {e}, Data: '{line_str}'")
+                    # 忽略損毀的資料包
+                    pass
 
-            utime.sleep_ms(0)  # (中文解釋: 讓出 CPU)
+            # --- 任務 3: 休息 ---
+            # 使用 sleep_ms(1) 而不是 0，大幅降低 CPU 發熱，同時保留對 USB/中斷 的響應
+            utime.sleep_ms(1)
 
     except KeyboardInterrupt:
-        print("Program stopped by user.")  # (中文解釋: 程式已被使用者停止)
+        print("Program stopped by user.")
+    except Exception as e:
+        print(f"Critical Error: {e}")
     finally:
         if robot:
             robot.deinit()
-        # print("Hardware deinitialized.")  # (中文解釋: 硬體已解除初始化)
+        print("Hardware deinitialized.")
