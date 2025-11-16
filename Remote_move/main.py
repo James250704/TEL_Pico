@@ -27,9 +27,9 @@ class CommConfig:
 class HardwareConfig:
     MOTOR_PINS = [
         (2, 3, False),  # 左前 (LF)
-        (6, 7, False),  # 右前 (RF)
+        (6, 7, True),  # 右前 (RF)
         (10, 11, False),  # 右後 (RR)
-        (4, 5, False),  # 左後 (LR)
+        (4, 5, True),  # 左後 (LR)
     ]
     ENCODER_PINS = [12, 13, 14, 15]
 
@@ -48,7 +48,7 @@ class RobotParams:
     MAX_RPS = 7.0
     PID_OUT_LIM = 30.0
     MAX_DUTY = 40000
-    DEFAULT_MOTOR_SCALE = [1.0, 1.0, 1.0, 1.0]
+    DEFAULT_MOTOR_SCALE = [1.0, 0.97, 0.97, 1.0]
 
 
 # ==================== PID 控制器 ====================
@@ -226,8 +226,8 @@ class MecanumRobot:
 
     def apply_kinematics(self, vx: float, vy: float, omega: float):
         # 運動學計算 (保持不變)
-        vx_rps = (vx / 100.0) * self.params.MAX_RPS
-        vy_rps = (vy / 100.0) * self.params.MAX_RPS
+        vx_rps = (vy / 100.0) * self.params.MAX_RPS
+        vy_rps = (vx / 100.0) * self.params.MAX_RPS
         omega_rps = (omega / 100.0) * self.params.MAX_RPS
 
         lf_rps = vx_rps + vy_rps + omega_rps
