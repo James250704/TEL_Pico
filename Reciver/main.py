@@ -57,13 +57,13 @@ class RemoteControlTransmitter:
         self.failsafe_active = False
         self.processed_values = [0] * 10
 
-        print("Remote receiver initialized.")
-        print(
-            f"Listening to DBR4 on UART {CrsfConfig.UART_ID} (RX:{CrsfConfig.RX_PIN_DBR4})"
-        )
-        print(
-            f"Transmitting commands on UART {CommConfig.UART_ID} (TX:{CommConfig.TX_PIN_TO_MAIN})"
-        )
+        # print("Remote receiver initialized.")
+        # print(
+        #     f"Listening to DBR4 on UART {CrsfConfig.UART_ID} (RX:{CrsfConfig.RX_PIN_DBR4})"
+        # )
+        # print(
+        #     f"Transmitting commands on UART {CommConfig.UART_ID} (TX:{CommConfig.TX_PIN_TO_MAIN})"
+        # )
 
     def _crc8_d5(self, data: memoryview) -> int:
         """計算 CRSF CRC-8/D5 校驗碼"""
@@ -131,9 +131,18 @@ class RemoteControlTransmitter:
     def _deadband(self, val: int, channel_index: int) -> int:
         if channel_index == 9:
             threshold = CrsfConfig.RC_DEADBAND_CH9
+
+            if abs(val) < threshold:
+                return 0
+
+            if val > 0:
+                return val - threshold
+            else:
+                return val + threshold
         else:
+            # 其他頻道維持預設行為 (超過死區直接輸出原始值，不位移)
             threshold = CrsfConfig.RC_DEADBAND_DEFAULT
-        return 0 if abs(val) < threshold else val
+            return 0 if abs(val) < threshold else val
 
     def update_and_transmit(self):
         ch = self._poll_dbr4_uart()
@@ -147,7 +156,7 @@ class RemoteControlTransmitter:
 
         if time_since_last_packet > CrsfConfig.FAILSAFE_TIMEOUT_MS:
             if not self.failsafe_active:
-                print("FAILSAFE: RC signal lost. Setting all channels to 0.")
+                # print("FAILSAFE: RC signal lost. Setting all channels to 0.")
                 self.failsafe_active = True
 
             for i in range(10):
@@ -157,7 +166,7 @@ class RemoteControlTransmitter:
             self.last_final = [0] * 10
         else:
             if self.failsafe_active:
-                print("FAILSAFE: RC signal recovered.")
+                # print("FAILSAFE: RC signal recovered.")
                 self.failsafe_active = False
 
             for i in range(10):
@@ -198,13 +207,13 @@ if __name__ == "__main__":
 
     transmitter = RemoteControlTransmitter()
 
-    print("System Started (Memory Optimized, No WDT).")
+    # print("System Started (Memory Optimized, No WDT).")
 
     while True:
         try:
             led.toggle()
             transmitter.update_and_transmit()
-            utime.sleep_ms(5)
+            utime.sleep_ms(1)
 
         except KeyboardInterrupt:
             print("Program stopped.")

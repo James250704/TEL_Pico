@@ -19,7 +19,6 @@ MIN_DUTY_US = 1000  # stop
 MAX_DUTY_US = 2000  # full throttle
 STOP_PULSE_US = 1000
 
-
 # ====================【修改點 1: 新增 UART 設定】====================
 class CommConfig:
     UART_ID = 0

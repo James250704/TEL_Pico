@@ -13,11 +13,8 @@ micropython.alloc_emergency_exception_buf(100)
 ENABLE_PID = True
 
 
-# ==================== 通訊設定 (修正為配合 Remote Receiver) ====================
+# ==================== 通訊設定 ====================
 class CommConfig:
-    # 【重要修正】
-    # 遙控器接收端 (remote_receiver.py) 是使用 UART 1 (TX=8, RX=9)
-    # 所以這裡必須交叉連接：接收端 TX(8) -> 底盤 RX(9)
     UART_ID = 0
     BAUDRATE = 115200
     TX_PIN_TO_REMOTE = 16  # 對應遙控端的 RX
@@ -259,7 +256,7 @@ if __name__ == "__main__":
     robot = None
 
     try:
-        print("Initializing Robot System...")
+        # print("Initializing Robot System...")
         params = RobotParams()
         robot = MecanumRobot(params)
         led = Pin("LED", Pin.OUT)
@@ -271,9 +268,9 @@ if __name__ == "__main__":
             tx=Pin(CommConfig.TX_PIN_TO_REMOTE),
             rx=Pin(CommConfig.RX_PIN_FROM_REMOTE),
         )
-        print(
-            f"UART Listening on ID={CommConfig.UART_ID}, RX={CommConfig.RX_PIN_FROM_REMOTE}"
-        )
+        # print(
+        #     f"UART Listening on ID={CommConfig.UART_ID}, RX={CommConfig.RX_PIN_FROM_REMOTE}"
+        # )
 
         command_buffer = b""
 

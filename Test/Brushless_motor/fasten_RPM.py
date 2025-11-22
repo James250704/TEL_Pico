@@ -66,10 +66,12 @@ def main():
 
         # --- MODIFICATION (修改點) ---
         # (中文解釋：設定固定速度 70% 並移除使用者輸入)
-        fixed_speed = 50
-        print(f"Setting fixed speed to {fixed_speed}% for both motors.")
-        set_speed(pwm1, fixed_speed)
-        set_speed(pwm2, fixed_speed)
+        up_speed = 90
+        down_speed = 50
+        # print(f"Setting fixed speed to {fixed_speed}% for both motors.")
+        print(f"speed: {up_speed}% and {down_speed}%。")
+        set_speed(pwm1, down_speed)
+        set_speed(pwm2, up_speed)
 
         print("Motors running. Press Ctrl+C to stop.")
         # (中文解釋：馬達運行中。按下 Ctrl+C 來停止。)
